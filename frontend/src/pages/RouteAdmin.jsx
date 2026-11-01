@@ -1120,7 +1120,7 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
                   {filteredOrders.length === 0 ? (
                     <tr>
                       <td colSpan="6" className="py-12 text-center text-gray-400 font-medium">
-                        No orders recorded yet.
+                        No orders found.
                       </td>
                     </tr>
                   ) : (

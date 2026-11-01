@@ -335,7 +335,7 @@ export const api = {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           const mapped = data.map(o => ({
             orderId: o.order_id,
             customerName: o.customer_name,
@@ -358,13 +358,22 @@ export const api = {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/orders`);
-      if (!res.ok) throw new Error('Network error');
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/orders`, {
+        headers,
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error(`Orders fetch failed: ${res.status}`);
       const json = await res.json();
-      return json.data;
+      const orders = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
+      localStorage.setItem('speedo_cache_orders', JSON.stringify(orders));
+      return orders;
     } catch (err) {
-      const cached = localStorage.getItem('speedo_cache_orders');
-      if (cached) return JSON.parse(cached);
+      console.warn('Failed to fetch orders from backend:', err);
       return [];
     }
   },
@@ -452,9 +461,15 @@ export const api = {
     }
 
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({ status })
       });
       if (!res.ok) throw new Error('Status update failed');
@@ -1168,7 +1183,7 @@ export const api = {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data) && data.length > 0) {
           return data.map(r => ({
             id: r.id || r.review_id,
             reviewId: r.review_id || String(r.id),
@@ -1200,13 +1215,20 @@ export const api = {
 
     // Try Node Backend
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch(`${API_BASE}/admin/reviews`, {
-        headers: { 'Authorization': `Bearer ${sessionStorage.getItem('speedo_admin_token') || 'speedo-admin-token-origami-secure'}` }
+        headers,
+        credentials: 'include'
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.reviews && Array.isArray(json.reviews)) {
-          return json.reviews.map(r => ({
+        const reviewList = json.reviews || json.data || (Array.isArray(json) ? json : []);
+        if (Array.isArray(reviewList)) {
+          return reviewList.map(r => ({
             id: r.id || r.review_id,
             reviewId: r.review_id || String(r.id),
             customerId: r.customer_id,
@@ -1220,12 +1242,12 @@ export const api = {
             title: r.review_title || r.title || 'Review',
             comment: r.comment || r.quote,
             quote: r.comment || r.quote,
-            isApproved: !!r.is_approved,
-            isFeatured: !!r.is_featured,
-            featured: !!r.is_featured,
-            verifiedPurchase: !!r.verified_purchase,
-            verified: !!r.verified_purchase,
-            status: r.is_approved ? 'approved' : 'pending',
+            isApproved: !!(r.is_approved || r.isApproved || r.status === 'approved'),
+            isFeatured: !!(r.is_featured || r.featured),
+            featured: !!(r.is_featured || r.featured),
+            verifiedPurchase: !!(r.verified_purchase || r.verified),
+            verified: !!(r.verified_purchase || r.verified),
+            status: (r.is_approved || r.status === 'approved') ? 'approved' : 'pending',
             createdAt: r.created_at,
             date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent'
           }));
