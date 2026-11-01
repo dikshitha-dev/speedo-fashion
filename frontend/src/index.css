@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper-white-origami: #FAFAFA;
+  --fold-shadow-origami: #B0B0B0;
+  --ink-black-origami: #1A1A1A;
+  --accent-coral-origami: #FF6B6B;
+  --sky-fold: #87CEEB;
+  --sage-paper: #A8D5BA;
+  --warm-crease: #F0C987;
+  --steel-grey: #4A4A4A;
+  --fold-perspective: 800px;
+  --font-origami: 'Poppins', sans-serif;
+  --font-display: 'Space Grotesk', sans-serif;
+}
+
+body {
+  font-family: var(--font-origami);
+  background-color: var(--paper-white-origami);
+  color: var(--ink-black-origami);
+  overflow-x: hidden;
+}
+
+/* Origami Tessellation Pattern */
+.bg-tessellation {
+  background-color: #FAFAFA;
+  background-image: 
+    linear-gradient(135deg, #FAFAFA 25%, #F0F0F0 25%, #F0F0F0 50%, #FAFAFA 50%, #FAFAFA 75%, #F0F0F0 75%, #F0F0F0 100%),
+    linear-gradient(45deg, rgba(255, 107, 107, 0.03) 25%, transparent 25%, transparent 75%, rgba(135, 206, 235, 0.03) 75%);
+  background-size: 32px 32px, 64px 64px;
+}
+
+.bg-tessellation-dark {
+  background-color: #151515;
+  background-image: 
+    linear-gradient(135deg, #1A1A1A 25%, #111111 25%, #111111 50%, #1A1A1A 50%, #1A1A1A 75%, #111111 75%, #111111 100%);
+  background-size: 28px 28px;
+}
+
+/* Origami Clip Paths */
+.clip-origami-hero {
+  clip-path: polygon(0 0, 100% 0, 100% 88%, 0 100%);
+}
+
+.clip-origami-invert {
+  clip-path: polygon(0 12%, 100% 0, 100% 100%, 0 100%);
+}
+
+.clip-origami-badge {
+  clip-path: polygon(10px 0%, 100% 0%, calc(100% - 10px) 100%, 0% 100%);
+}
+
+.clip-origami-card {
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+
+.clip-origami-facet {
+  clip-path: polygon(14% 0, 86% 0, 100% 14%, 100% 86%, 86% 100%, 14% 100%, 0 86%, 0 14%);
+}
+
+.clip-origami-btn {
+  clip-path: polygon(12px 0%, 100% 0%, calc(100% - 12px) 100%, 0% 100%);
+}
+
+.clip-origami-tag {
+  clip-path: polygon(0% 0%, 82% 0%, 100% 50%, 82% 100%, 0% 100%);
+}
+
+/* Paper Fold Shadows */
+.shadow-origami {
+  box-shadow: 4px 4px 0 var(--fold-shadow-origami), -4px -4px 0 rgba(255, 255, 255, 0.8);
+}
+
+.shadow-origami-bold {
+  box-shadow: 6px 6px 0 var(--ink-black-origami), -2px -2px 0 rgba(255, 255, 255, 0.9);
+}
+
+.shadow-origami-coral {
+  box-shadow: 6px 6px 0 var(--accent-coral-origami);
+}
+
+/* Faceted Card Surface */
+.faceted-surface {
+  background: linear-gradient(135deg, #FFFFFF 0%, #FAFAFA 50%, #EFEFEF 100%);
+  border: 1px solid rgba(176, 176, 176, 0.35);
+  position: relative;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+  transform: perspective(var(--fold-perspective)) rotateY(0deg);
+}
+
+.faceted-surface::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, transparent 50%, rgba(176, 176, 176, 0.35) 50%);
+  pointer-events: none;
+}
+
+.faceted-surface:hover {
+  transform: perspective(var(--fold-perspective)) rotateY(3deg) translateY(-5px);
+  box-shadow: 8px 8px 0 var(--ink-black-origami), -3px -3px 0 rgba(255, 255, 255, 0.95);
+}
+
+/* Origami 3D Stage */
+.origami-stage {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  animation: origamiFloat 8s ease-in-out infinite alternate;
+}
+
+@keyframes origamiFloat {
+  0% {
+    transform: rotateX(14deg) rotateY(-18deg) rotateZ(2deg) translateY(0px);
+  }
+  50% {
+    transform: rotateX(18deg) rotateY(16deg) rotateZ(-3deg) translateY(-14px);
+  }
+  100% {
+    transform: rotateX(8deg) rotateY(-20deg) rotateZ(3deg) translateY(6px);
+  }
+}
+
+.origami-face {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  top: 50%;
+  left: 50%;
+  margin-left: -80px;
+  margin-top: -80px;
+  transform-origin: center center;
+  transition: all 0.5s ease;
+  backface-visibility: visible;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #F0F0F0;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-black-origami);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-coral-origami);
+}
+

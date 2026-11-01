@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+*.env
+*.env.local
+*.env.production
+backend/.env
+frontend/.env
+*.pem
+*.key
+
+# Build outputs
+dist/
+build/
+*/dist/
+*/build/
+
+# Vite & IDE Cache
+.vite/
+*/.vite/
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# OS Metadata
+.DS_Store
+Thumbs.db
+
+# Temporary scratch & test artifacts
+nav_ref_crop.png
+nav_exact_logo.png
+temp_*
+scratch/

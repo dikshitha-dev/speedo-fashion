@@ -1,0 +1,12 @@
+{
+  "name": "speedo-fashion-monorepo",
+  "version": "1.0.0",
+  "description": "Speedo Fashions - Origami Geométrico Full Stack E-Commerce & CRM System",
+  "scripts": {
+    "start:backend": "node backend/server.js",
+    "start:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend"
+  },
+  "keywords": ["origami", "fashion", "react", "nodejs", "crm", "ecommerce"]
+}
+
