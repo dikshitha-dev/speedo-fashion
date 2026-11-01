@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
 
 // Supabase Database Client
 let supabase = null;
-if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {
+if (process.env.DISABLE_SUPABASE !== 'true' && process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {
   try {
     supabase = createClient(
       process.env.SUPABASE_URL,
@@ -396,6 +396,10 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
         return res.status(201).json({ success: true, message: 'Product created in Supabase', data: newProduct });
       } else if (error) {
         console.error('Supabase product insert error:', error.message);
+        if (error.message && (error.message.includes('fetch failed') || error.message.includes('ENOTFOUND') || error.message.includes('NetworkError'))) {
+          memoryProducts.unshift(newProduct);
+          return res.status(201).json({ success: true, message: 'Product created', data: newProduct });
+        }
         return res.status(400).json({ success: false, message: error.message, code: error.code });
       }
     } catch (err) {
@@ -585,7 +589,7 @@ app.post('/api/categories', requireAdminAuth, async (req, res) => {
     return res.status(400).json({ success: false, message: `Category "${trimmedName}" already exists` });
   }
   const newCat = {
-    id: Date.now(),
+    id: Date.now() + Math.floor(Math.random() * 10000),
     name: trimmedName,
     slug,
     description: description ? description.trim() : '',
@@ -1510,8 +1514,8 @@ app.post('/api/reviews', async (req, res) => {
   const finalProdName = (product_name || productName || item || '').trim();
   const finalCustId = (customer_phone || customerPhone || phone || customer_id || customerId || '').trim();
 
-  if (!finalName) {
-    return res.status(400).json({ success: false, message: 'Please enter your name.' });
+  if (!finalName || finalName.length < 2) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid customer name (at least 2 characters).' });
   }
 
   const numRating = parseInt(rating, 10);
@@ -1519,8 +1523,8 @@ app.post('/api/reviews', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Please provide a star rating between 1 and 5.' });
   }
 
-  if (!finalComment) {
-    return res.status(400).json({ success: false, message: 'Please write your review comment.' });
+  if (!finalComment || finalComment.length < 8) {
+    return res.status(400).json({ success: false, message: 'Please write a review comment (at least 8 characters).' });
   }
 
   // Check verified purchase against customer orders
@@ -1602,56 +1606,114 @@ app.get('/api/admin/reviews', requireAdminAuth, async (req, res) => {
   res.json({ success: true, reviews: memoryReviews });
 });
 
+// Centralized Product Rating & Review Count Recalculation
+async function recalculateProductRating(productId) {
+  if (!productId) return null;
+  const prodId = String(productId).trim();
+
+  let approvedRatings = [];
+
+  if (supabase) {
+    try {
+      const { data: revs, error } = await supabase
+        .from('reviews')
+        .select('rating')
+        .eq('product_id', prodId)
+        .eq('is_approved', true);
+
+      if (!error && Array.isArray(revs)) {
+        approvedRatings = revs
+          .map(r => Number(r.rating))
+          .filter(r => !isNaN(r) && r >= 1 && r <= 5);
+      }
+    } catch (e) {
+      console.warn('Supabase rating fetch error:', e.message);
+    }
+  }
+
+  // Fallback / complement with memoryReviews
+  if (approvedRatings.length === 0) {
+    const memRevs = memoryReviews.filter(
+      r => String(r.product_id) === prodId && (r.is_approved === true || r.status === 'approved')
+    );
+    if (memRevs.length > 0) {
+      approvedRatings = memRevs
+        .map(r => Number(r.rating))
+        .filter(r => !isNaN(r) && r >= 1 && r <= 5);
+    }
+  }
+
+  const count = approvedRatings.length;
+  let newRating = 5.0;
+  if (count > 0) {
+    const sum = approvedRatings.reduce((acc, r) => acc + r, 0);
+    newRating = parseFloat((sum / count).toFixed(1));
+  }
+
+  if (supabase) {
+    try {
+      await supabase
+        .from('products')
+        .update({
+          rating: newRating,
+          reviews_count: count
+        })
+        .eq('id', prodId);
+      console.log(`[Rating Recalculation] Updated product ${prodId}: rating=${newRating}, reviews_count=${count}`);
+    } catch (err) {
+      console.warn('Supabase product rating update error:', err.message);
+    }
+  }
+
+  // Keep memoryProducts in sync
+  const memProd = memoryProducts.find(p => String(p.id) === prodId);
+  if (memProd) {
+    memProd.rating = newRating;
+    memProd.reviewsCount = count;
+    memProd.reviews_count = count;
+  }
+
+  return { rating: newRating, reviewsCount: count };
+}
+
 // 4. Admin: Approve or Reject Review
 app.put('/api/admin/reviews/:id/approve', requireAdminAuth, async (req, res) => {
   const id = req.params.id;
   const { is_approved } = req.body;
   const targetApproved = is_approved !== undefined ? !!is_approved : true;
+  let targetProductId = null;
+
+  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
+  if (item && item.product_id) {
+    targetProductId = item.product_id;
+  }
 
   if (supabase) {
     try {
-      await supabase
-        .from('reviews')
-        .update({ is_approved: targetApproved })
-        .or('id.eq.' + id + ',review_id.eq.' + id);
-
-      // Dynamically recalculate product rating & reviews_count in public.products
-      try {
-        const { data: revData } = await supabase
+      if (!targetProductId) {
+        const { data: existing } = await supabase
           .from('reviews')
           .select('product_id')
           .or('id.eq.' + id + ',review_id.eq.' + id)
           .single();
-
-        if (revData && revData.product_id) {
-          const { data: prodRevs } = await supabase
-            .from('reviews')
-            .select('rating')
-            .eq('product_id', revData.product_id)
-            .eq('is_approved', true);
-
-          if (prodRevs && prodRevs.length > 0) {
-            const avg = (prodRevs.reduce((sum, r) => sum + (Number(r.rating) || 5), 0) / prodRevs.length).toFixed(1);
-            await supabase
-              .from('products')
-              .update({
-                rating: parseFloat(avg),
-                reviews_count: prodRevs.length
-              })
-              .eq('id', revData.product_id);
-          }
-        }
-      } catch (ratingErr) {
-        console.warn('Product rating update warning:', ratingErr.message);
+        if (existing && existing.product_id) targetProductId = existing.product_id;
       }
+
+      await supabase
+        .from('reviews')
+        .update({ is_approved: targetApproved })
+        .or('id.eq.' + id + ',review_id.eq.' + id);
     } catch (sbErr) {
       console.warn('Supabase approve review error:', sbErr.message);
     }
   }
 
-  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
   if (item) {
     item.is_approved = targetApproved;
+  }
+
+  if (targetProductId) {
+    await recalculateProductRating(targetProductId);
   }
 
   res.json({
@@ -1703,8 +1765,23 @@ app.put('/api/reviews/:id', requireAdminAuth, async (req, res) => {
   if (rating !== undefined) updates.rating = Number(rating);
   if (review_title !== undefined) updates.review_title = review_title;
 
+  let targetProductId = null;
+  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
+  if (item && item.product_id) {
+    targetProductId = item.product_id;
+  }
+
   if (supabase) {
     try {
+      if (!targetProductId) {
+        const { data: existing } = await supabase
+          .from('reviews')
+          .select('product_id')
+          .or('id.eq.' + id + ',review_id.eq.' + id)
+          .single();
+        if (existing && existing.product_id) targetProductId = existing.product_id;
+      }
+
       await supabase
         .from('reviews')
         .update(updates)
@@ -1714,9 +1791,12 @@ app.put('/api/reviews/:id', requireAdminAuth, async (req, res) => {
     }
   }
 
-  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
   if (item) {
     Object.assign(item, updates);
+  }
+
+  if (targetProductId && (updates.is_approved !== undefined || updates.rating !== undefined)) {
+    await recalculateProductRating(targetProductId);
   }
 
   res.json({ success: true, review: item || { id, ...updates } });
@@ -1725,9 +1805,24 @@ app.put('/api/reviews/:id', requireAdminAuth, async (req, res) => {
 // 7. Admin: Delete Review
 app.delete('/api/admin/reviews/:id', requireAdminAuth, async (req, res) => {
   const id = req.params.id;
+  let targetProductId = null;
+
+  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
+  if (item && item.product_id) {
+    targetProductId = item.product_id;
+  }
 
   if (supabase) {
     try {
+      if (!targetProductId) {
+        const { data: existing } = await supabase
+          .from('reviews')
+          .select('product_id')
+          .or('id.eq.' + id + ',review_id.eq.' + id)
+          .single();
+        if (existing && existing.product_id) targetProductId = existing.product_id;
+      }
+
       await supabase
         .from('reviews')
         .delete()
@@ -1738,14 +1833,34 @@ app.delete('/api/admin/reviews/:id', requireAdminAuth, async (req, res) => {
   }
 
   memoryReviews = memoryReviews.filter(r => String(r.id) !== String(id) && String(r.review_id) !== String(id));
+
+  if (targetProductId) {
+    await recalculateProductRating(targetProductId);
+  }
+
   res.json({ success: true, message: 'Review deleted successfully.' });
 });
 
 app.delete('/api/reviews/:id', requireAdminAuth, async (req, res) => {
   const id = req.params.id;
+  let targetProductId = null;
+
+  const item = memoryReviews.find(r => String(r.id) === String(id) || String(r.review_id) === String(id));
+  if (item && item.product_id) {
+    targetProductId = item.product_id;
+  }
 
   if (supabase) {
     try {
+      if (!targetProductId) {
+        const { data: existing } = await supabase
+          .from('reviews')
+          .select('product_id')
+          .or('id.eq.' + id + ',review_id.eq.' + id)
+          .single();
+        if (existing && existing.product_id) targetProductId = existing.product_id;
+      }
+
       await supabase
         .from('reviews')
         .delete()
@@ -1756,9 +1871,18 @@ app.delete('/api/reviews/:id', requireAdminAuth, async (req, res) => {
   }
 
   memoryReviews = memoryReviews.filter(r => String(r.id) !== String(id) && String(r.review_id) !== String(id));
+
+  if (targetProductId) {
+    await recalculateProductRating(targetProductId);
+  }
+
   res.json({ success: true, message: 'Review deleted successfully.' });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`⚡ Speedo Fashions Backend running on http://${HOST}:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, HOST, () => {
+    console.log(`⚡ Speedo Fashions Backend running on http://${HOST}:${PORT}`);
+  });
+}
+
+module.exports = app;

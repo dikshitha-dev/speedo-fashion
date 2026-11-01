@@ -48,3 +48,6 @@ nav_ref_crop.png
 nav_exact_logo.png
 temp_*
 scratch/
+
+backups/
+diagnostics-results.json

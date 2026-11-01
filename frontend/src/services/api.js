@@ -403,38 +403,8 @@ export const api = {
     }
   },
 
-  // Fetch Orders
+  // Fetch Orders (Strictly via Authenticated Backend to Protect Customer Data)
   getOrders: async () => {
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        const { data, error } = await sb
-          .from('orders')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!error && Array.isArray(data)) {
-          const mapped = data.map(o => ({
-            orderId: o.order_id,
-            customerName: o.customer_name,
-            customerEmail: o.customer_email,
-            customerPhone: o.customer_phone,
-            date: o.created_at ? new Date(o.created_at).toISOString().replace('T', ' ').substring(0, 16) : '',
-            items: o.items || [],
-            total: Number(o.total),
-            status: o.status,
-            shippingAddress: o.shipping_address,
-            paymentMethod: o.payment_method,
-            notes: o.notes
-          }));
-          localStorage.setItem('speedo_cache_orders', JSON.stringify(mapped));
-          return mapped;
-        }
-      } catch (sbErr) {
-        console.warn('Supabase orders fetch error:', sbErr);
-      }
-    }
-
     try {
       const token = sessionStorage.getItem('speedo_admin_token');
       const headers = { 'Content-Type': 'application/json' };
@@ -445,15 +415,31 @@ export const api = {
         headers,
         credentials: 'include'
       });
-      if (!res.ok) throw new Error(`Orders fetch failed: ${res.status}`);
-      const json = await res.json();
-      const orders = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
-      localStorage.setItem('speedo_cache_orders', JSON.stringify(orders));
-      return orders;
+      if (res.ok) {
+        const json = await res.json();
+        const orders = Array.isArray(json.data) ? json.data : (Array.isArray(json.orders) ? json.orders : (Array.isArray(json) ? json : []));
+        const mapped = orders.map(o => ({
+          orderId: o.orderId || o.order_id,
+          customerName: o.customerName || o.customer_name,
+          customerEmail: o.customerEmail || o.customer_email,
+          customerPhone: o.customerPhone || o.customer_phone,
+          date: o.date || (o.created_at ? new Date(o.created_at).toISOString().replace('T', ' ').substring(0, 16) : ''),
+          items: o.items || [],
+          total: Number(o.total),
+          status: o.status,
+          shippingAddress: o.shippingAddress || o.shipping_address,
+          paymentMethod: o.paymentMethod || o.payment_method,
+          notes: o.notes
+        }));
+        localStorage.setItem('speedo_cache_orders', JSON.stringify(mapped));
+        return mapped;
+      }
     } catch (err) {
-      console.warn('Failed to fetch orders from backend:', err);
-      return [];
+      console.warn('Backend orders fetch failed, reading cache:', err);
     }
+
+    const cached = JSON.parse(localStorage.getItem('speedo_cache_orders') || '[]');
+    return cached;
   },
 
   // Place Order
@@ -1251,47 +1237,8 @@ export const api = {
   },
 
   // 3. Admin: Get ALL Reviews (Approved + Pending)
+  // Calls authenticated backend directly using admin session credentials
   getAdminReviews: async () => {
-    // Try Supabase direct
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        const { data, error } = await sb
-          .from('reviews')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!error && Array.isArray(data) && data.length > 0) {
-          return data.map(r => ({
-            id: r.id || r.review_id,
-            reviewId: r.review_id || String(r.id),
-            customerId: r.customer_id,
-            customerName: r.customer_name,
-            name: r.customer_name,
-            productId: r.product_id,
-            productName: r.product_name,
-            item: r.product_name,
-            rating: Number(r.rating) || 5,
-            reviewTitle: r.review_title || 'Review',
-            title: r.review_title || 'Review',
-            comment: r.comment,
-            quote: r.comment,
-            isApproved: !!r.is_approved,
-            isFeatured: !!r.is_featured,
-            featured: !!r.is_featured,
-            verifiedPurchase: !!r.verified_purchase,
-            verified: !!r.verified_purchase,
-            status: r.is_approved ? 'approved' : 'pending',
-            createdAt: r.created_at,
-            date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent'
-          }));
-        }
-      } catch (sbErr) {
-        console.warn('Supabase admin reviews fetch error:', sbErr);
-      }
-    }
-
-    // Try Node Backend
     try {
       const token = sessionStorage.getItem('speedo_admin_token');
       const headers = { 'Content-Type': 'application/json' };
@@ -1338,109 +1285,63 @@ export const api = {
     return await api.getReviews();
   },
 
-  // 4. Admin: Approve or Reject Review
+  // 4. Admin: Approve or Reject Review (Exclusively via authenticated backend)
   approveReview: async (id, isApproved) => {
-    // 1. Supabase direct
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        await sb
-          .from('reviews')
-          .update({ is_approved: isApproved })
-          .or(`id.eq.${id},review_id.eq.${id}`);
-      } catch (sbErr) {
-        console.warn('Supabase approve review error:', sbErr);
-      }
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE}/admin/reviews/${id}/approve`, {
+      method: 'PUT',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ is_approved: isApproved })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Failed to update review approval (${res.status})`);
     }
-
-    // 2. Node Backend
-    try {
-      const token = sessionStorage.getItem('speedo_admin_token');
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/admin/reviews/${id}/approve`, {
-        method: 'PUT',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({ is_approved: isApproved })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend approve review error:', e);
-    }
-
-    return { success: true, message: isApproved ? 'Review approved' : 'Review rejected' };
+    return await res.json();
   },
 
-  // 5. Admin: Feature or Unfeature Review
+  // 5. Admin: Feature or Unfeature Review (Exclusively via authenticated backend)
   featureReview: async (id, isFeatured) => {
-    // 1. Supabase direct
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        await sb
-          .from('reviews')
-          .update({ is_featured: isFeatured })
-          .or(`id.eq.${id},review_id.eq.${id}`);
-      } catch (sbErr) {
-        console.warn('Supabase feature review error:', sbErr);
-      }
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE}/admin/reviews/${id}/feature`, {
+      method: 'PUT',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ is_featured: isFeatured })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Failed to update review featured status (${res.status})`);
     }
-
-    // 2. Node Backend
-    try {
-      const token = sessionStorage.getItem('speedo_admin_token');
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/admin/reviews/${id}/feature`, {
-        method: 'PUT',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({ is_featured: isFeatured })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend feature review error:', e);
-    }
-
-    return { success: true, message: isFeatured ? 'Review featured' : 'Review unfeatured' };
+    return await res.json();
   },
 
-  // 6. Admin: Delete Review
+  // 6. Admin: Delete Review (Exclusively via authenticated backend)
   deleteReview: async (id) => {
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        await sb
-          .from('reviews')
-          .delete()
-          .or(`id.eq.${id},review_id.eq.${id}`);
-      } catch (sbErr) {
-        console.warn('Supabase delete review error:', sbErr);
-      }
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE}/admin/reviews/${id}`, {
+      method: 'DELETE',
+      headers,
+      credentials: 'include'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Failed to delete review (${res.status})`);
     }
-
-    try {
-      const token = sessionStorage.getItem('speedo_admin_token');
-      const headers = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/admin/reviews/${id}`, {
-        method: 'DELETE',
-        headers,
-        credentials: 'include'
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend delete review error:', e);
-    }
-
-    return { success: true, message: 'Review deleted successfully' };
+    return await res.json();
   },
 
-  addReview: async (reviewData) => {
+    addReview: async (reviewData) => {
     return await api.submitReview(reviewData);
   },
 
@@ -1649,7 +1550,8 @@ export const api = {
         if (error) throw new Error(error.message);
         return true;
       } catch (sbErr) {
-        throw sbErr;
+        if (sbErr.message && sbErr.message.includes('assigned product')) throw sbErr;
+        console.warn('Supabase delete category error, falling back to backend:', sbErr.message);
       }
     }
 
