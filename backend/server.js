@@ -1614,6 +1614,36 @@ app.put('/api/admin/reviews/:id/approve', requireAdminAuth, async (req, res) => 
         .from('reviews')
         .update({ is_approved: targetApproved })
         .or('id.eq.' + id + ',review_id.eq.' + id);
+
+      // Dynamically recalculate product rating & reviews_count in public.products
+      try {
+        const { data: revData } = await supabase
+          .from('reviews')
+          .select('product_id')
+          .or('id.eq.' + id + ',review_id.eq.' + id)
+          .single();
+
+        if (revData && revData.product_id) {
+          const { data: prodRevs } = await supabase
+            .from('reviews')
+            .select('rating')
+            .eq('product_id', revData.product_id)
+            .eq('is_approved', true);
+
+          if (prodRevs && prodRevs.length > 0) {
+            const avg = (prodRevs.reduce((sum, r) => sum + (Number(r.rating) || 5), 0) / prodRevs.length).toFixed(1);
+            await supabase
+              .from('products')
+              .update({
+                rating: parseFloat(avg),
+                reviews_count: prodRevs.length
+              })
+              .eq('id', revData.product_id);
+          }
+        }
+      } catch (ratingErr) {
+        console.warn('Product rating update warning:', ratingErr.message);
+      }
     } catch (sbErr) {
       console.warn('Supabase approve review error:', sbErr.message);
     }

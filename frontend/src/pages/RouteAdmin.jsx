@@ -188,41 +188,61 @@ export default function RouteAdmin({
   }).length;
 
   // --- CUSTOMER REVIEWS & FEEDBACK MANAGEMENT HANDLERS ---
-  const handleToggleFeaturedReview = async (review) => {
-    const isCurrentlyPublished = !!(review.featured || review.isPublished || review.status === 'approved');
-    const nextPublished = !isCurrentlyPublished;
-    const nextStatus = nextPublished ? 'approved' : 'pending';
+  const handleToggleApproveReview = async (review) => {
+    const isCurrentlyApproved = !!(review.isApproved || review.is_approved || review.status === 'approved');
+    const nextApproved = !isCurrentlyApproved;
+    const reviewId = review.id || review.reviewId;
 
     try {
-      if (api.updateFeedbackStatus) {
-        await api.updateFeedbackStatus(review.id, {
-          is_published: nextPublished,
-          status: nextStatus
-        });
-      } else {
-        await api.updateReview(review.id, {
-          ...review,
-          featured: nextPublished,
-          status: nextStatus
-        });
+      if (api.approveReview) {
+        await api.approveReview(reviewId, nextApproved);
       }
-      setReviews(prev => prev.map(r => r.id === review.id ? {
+      setReviews(prev => prev.map(r => (r.id === review.id || r.reviewId === review.reviewId) ? {
         ...r,
-        featured: nextPublished,
-        isPublished: nextPublished,
-        status: nextStatus
+        isApproved: nextApproved,
+        is_approved: nextApproved,
+        status: nextApproved ? 'approved' : 'pending'
       } : r));
       setStatusNotice(
-        nextPublished
-          ? `Feedback by "${review.name}" approved and published on the storefront.`
-          : `Feedback by "${review.name}" hidden from the storefront.`
+        nextApproved
+          ? `Review by "${review.customerName || review.name}" approved and published on storefront.`
+          : `Review by "${review.customerName || review.name}" revoked from storefront.`
       );
       setTimeout(() => setStatusNotice(''), 3000);
     } catch (err) {
-      console.error('Failed to update review status:', err);
-      alert('Failed to update review status');
+      console.error('Failed to toggle review approval:', err);
+      alert('Failed to update review approval');
     }
   };
+
+  const handleToggleFeatureReview = async (review) => {
+    const isCurrentlyFeatured = !!(review.featured || review.isFeatured || review.is_featured);
+    const nextFeatured = !isCurrentlyFeatured;
+    const reviewId = review.id || review.reviewId;
+
+    try {
+      if (api.featureReview) {
+        await api.featureReview(reviewId, nextFeatured);
+      }
+      setReviews(prev => prev.map(r => (r.id === review.id || r.reviewId === review.reviewId) ? {
+        ...r,
+        featured: nextFeatured,
+        isFeatured: nextFeatured,
+        is_featured: nextFeatured
+      } : r));
+      setStatusNotice(
+        nextFeatured
+          ? `Review by "${review.customerName || review.name}" featured on storefront.`
+          : `Review by "${review.customerName || review.name}" unfeatured.`
+      );
+      setTimeout(() => setStatusNotice(''), 3000);
+    } catch (err) {
+      console.error('Failed to toggle review featured status:', err);
+      alert('Failed to update review featured status');
+    }
+  };
+
+  const handleToggleFeaturedReview = handleToggleApproveReview;
 
   const handleDeleteReview = async (id, reviewerName) => {
     if (!window.confirm(`Are you sure you want to permanently delete the feedback by "${reviewerName}"?`)) {

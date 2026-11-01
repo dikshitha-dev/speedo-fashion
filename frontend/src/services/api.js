@@ -1355,12 +1355,14 @@ export const api = {
 
     // 2. Node Backend
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/admin/reviews/${id}/approve`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionStorage.getItem('speedo_admin_token') || 'speedo-admin-token-origami-secure'}`
-        },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({ is_approved: isApproved })
       });
       if (res.ok) return await res.json();
@@ -1388,12 +1390,14 @@ export const api = {
 
     // 2. Node Backend
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/admin/reviews/${id}/feature`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionStorage.getItem('speedo_admin_token') || 'speedo-admin-token-origami-secure'}`
-        },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({ is_featured: isFeatured })
       });
       if (res.ok) return await res.json();
@@ -1419,11 +1423,14 @@ export const api = {
     }
 
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/admin/reviews/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${sessionStorage.getItem('speedo_admin_token') || 'speedo-admin-token-origami-secure'}`
-        }
+        headers,
+        credentials: 'include'
       });
       if (res.ok) return await res.json();
     } catch (e) {
