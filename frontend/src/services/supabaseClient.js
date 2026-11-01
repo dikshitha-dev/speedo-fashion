@@ -12,15 +12,15 @@ export function getSupabaseConfig() {
     }
   }
 
-  const envUrl = import.meta.env?.VITE_SUPABASE_URL || 'https://tbrwvufwfjhenzpqdqnb.supabase.co';
-  const envKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_LcgOBln5bKXCzv2G7MvDhA_Qr1tsuzi';
-  if (envUrl && envKey && !envUrl.includes('YOUR_')) {
+  const envUrl = (import.meta.env?.VITE_SUPABASE_URL || '').trim();
+  const envKey = (import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
+  if (envUrl && envKey && !envUrl.includes('your-project-id') && !envUrl.includes('YOUR_')) {
     return { url: envUrl, anonKey: envKey };
   }
 
   return {
-    url: 'https://tbrwvufwfjhenzpqdqnb.supabase.co',
-    anonKey: 'sb_publishable_LcgOBln5bKXCzv2G7MvDhA_Qr1tsuzi'
+    url: '',
+    anonKey: ''
   };
 }
 
@@ -51,6 +51,7 @@ function initClient() {
       client = null;
     }
   } else {
+    console.warn('⚠️ Supabase credentials not found. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.');
     client = null;
   }
 }
@@ -123,4 +124,3 @@ export async function uploadImageToSupabase(file) {
     });
   }
 }
-

@@ -90,22 +90,30 @@ let memoryCategories = [
 // --- SECURE SERVER-SIDE ADMIN AUTHENTICATION (PBKDF2 + SESSIONS) ---
 const ADMIN_CONFIG = {
   username: process.env.ADMIN_USERNAME || 'admin',
-  salt: crypto.randomBytes(16).toString('hex')
+  salt: crypto.randomBytes(16).toString('hex'),
+  passwordHash: null
 };
 
-// Compute secure PBKDF2 hash on startup
-ADMIN_CONFIG.passwordHash = crypto.pbkdf2Sync(
-  process.env.ADMIN_PASSWORD || 'admin123',
-  ADMIN_CONFIG.salt,
-  100000,
-  64,
-  'sha512'
-).toString('hex');
-
-console.log(`🔐 Admin Security Initialized. Protected user: "${ADMIN_CONFIG.username}" (PBKDF2 SHA-512 secured)`);
+if (!process.env.ADMIN_PASSWORD) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ FATAL: ADMIN_PASSWORD environment variable is required in production.');
+    process.exit(1);
+  } else {
+    console.warn('⚠️ WARNING: ADMIN_PASSWORD environment variable is not set. Configure ADMIN_PASSWORD in backend/.env.');
+  }
+} else {
+  ADMIN_CONFIG.passwordHash = crypto.pbkdf2Sync(
+    process.env.ADMIN_PASSWORD,
+    ADMIN_CONFIG.salt,
+    100000,
+    64,
+    'sha512'
+  ).toString('hex');
+  console.log(`🔐 Admin Security Initialized. Protected user: "${ADMIN_CONFIG.username}" (PBKDF2 SHA-512 secured)`);
+}
 
 function verifyAdminPassword(inputPassword) {
-  if (!inputPassword || typeof inputPassword !== 'string') return false;
+  if (!ADMIN_CONFIG.passwordHash || !inputPassword || typeof inputPassword !== 'string') return false;
   const hash = crypto.pbkdf2Sync(
     inputPassword,
     ADMIN_CONFIG.salt,
@@ -173,7 +181,7 @@ app.post('/api/admin/login', (req, res) => {
 
   const cleanUser = String(username).trim();
   const isUserValid = cleanUser === ADMIN_CONFIG.username || cleanUser === 'admin@speedofashions.com';
-  const isPassValid = verifyAdminPassword(password) || password === 'admin123';
+  const isPassValid = verifyAdminPassword(password);
 
   if (!isUserValid || !isPassValid) {
     return res.status(401).json({

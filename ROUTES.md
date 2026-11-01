@@ -37,9 +37,11 @@ All admin functionality is consolidated under the masked prefix **`/speedo-contr
 | > **Taxonomy & Categories** | `/speedo-control` *(Sub-tab: `categories`)* | [`RouteAdmin.jsx`](frontend/src/pages/RouteAdmin.jsx) | **Yes** (Admin Session) | Admin Only | Add and manage product categories, view assigned item counts, and protect categories in use from accidental deletion. |
 | > **Customer Reviews Management** | `/speedo-control` *(Internal State: `reviews`)* | [`RouteAdmin.jsx`](frontend/src/pages/RouteAdmin.jsx) | **Yes** (Admin Session) | Admin Only | Moderate customer reviews: toggle "Featured on Storefront", delete reviews, or publish verified buyer testimonials with 1-5 star ratings. |
 
-### Default Admin Credentials
-* **Username:** `admin`
-* **Password:** `admin123`
+### Admin Authentication Configuration
+Admin credentials are managed strictly through server environment variables:
+* **Username Variable:** `ADMIN_USERNAME` (defaults to `admin`)
+* **Password Variable:** `ADMIN_PASSWORD` (configured in backend environment)
+* Passwords are cryptographically verified using PBKDF2 with SHA-512 and random salt.
 
 ---
 

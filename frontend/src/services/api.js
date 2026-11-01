@@ -533,18 +533,8 @@ export const api = {
       }
       return { success: false, message: data.message || 'Invalid username or password.' };
     } catch (err) {
-      console.warn('Backend login request error:', err);
-      // Fallback verification if backend port is not reachable directly in browser
-      if (username === 'admin' && password === 'admin123') {
-        const fallbackToken = 'speedo-admin-demo-token';
-        sessionStorage.setItem('speedo_admin_token', fallbackToken);
-        return {
-          success: true,
-          token: fallbackToken,
-          user: { username: 'admin', role: 'SuperAdmin' }
-        };
-      }
-      return { success: false, message: 'Invalid username or password.' };
+      console.error('Backend login request error:', err);
+      return { success: false, message: 'Unable to connect to authentication server. Please check backend connection.' };
     }
   },
 
