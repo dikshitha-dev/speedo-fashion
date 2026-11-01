@@ -203,10 +203,12 @@ app.post('/api/admin/login', (req, res) => {
     expiresAt
   });
 
-  // Set secure HTTP-Only session cookie
+  // Set secure HTTP-Only session cookie (SameSite=None; Secure required for cross-domain Vercel -> Render)
+  const isProd = process.env.NODE_ENV === 'production';
+  const cookieFlags = isProd ? 'SameSite=None; Secure' : 'SameSite=Lax';
   res.setHeader(
     'Set-Cookie',
-    `speedo_admin_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+    `speedo_admin_session=${sessionToken}; Path=/; HttpOnly; ${cookieFlags}; Max-Age=86400`
   );
 
   return res.json({
@@ -264,9 +266,11 @@ app.post('/api/admin/logout', (req, res) => {
     adminSessions.delete(token);
   }
 
+  const isProd = process.env.NODE_ENV === 'production';
+  const cookieFlags = isProd ? 'SameSite=None; Secure' : 'SameSite=Lax';
   res.setHeader(
     'Set-Cookie',
-    `speedo_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    `speedo_admin_session=; Path=/; HttpOnly; ${cookieFlags}; Max-Age=0`
   );
 
   return res.json({

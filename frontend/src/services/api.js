@@ -1,6 +1,19 @@
 import { getClient, isSupabaseConfigured } from './supabaseClient';
 
-const BACKEND_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
+// Determine backend URL: use VITE_API_URL if configured, otherwise determine based on host
+const getBackendUrl = () => {
+  const envUrl = import.meta.env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  // When running in production / deployed browser, default to the live Render backend
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return 'https://speedo-fashion.onrender.com';
+  }
+  return 'http://localhost:5000';
+};
+
+const BACKEND_URL = getBackendUrl();
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Fallback initial products in INR
