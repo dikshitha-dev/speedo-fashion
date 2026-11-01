@@ -401,7 +401,8 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
       price: product.price || '',
       originalPrice: product.originalPrice || '',
       stock: product.stock !== undefined ? product.stock : 10,
-      image: product.image || '',
+      image: product.image || (Array.isArray(product.images) && product.images[0]) || '',
+      images: Array.isArray(product.images) && product.images.length > 0 ? product.images : (product.image ? [product.image] : []),
       badge: product.badge || '',
       tag: product.tag || '',
       desc: product.desc || ''
@@ -421,7 +422,8 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
         price: parseFloat(editFormData.price),
         originalPrice: editFormData.originalPrice ? parseFloat(editFormData.originalPrice) : parseFloat(editFormData.price) * 1.25,
         stock: parseInt(editFormData.stock, 10),
-        image: editFormData.image,
+        image: editFormData.image || (Array.isArray(editFormData.images) && editFormData.images[0]) || '',
+        images: Array.isArray(editFormData.images) && editFormData.images.length > 0 ? editFormData.images : (editFormData.image ? [editFormData.image] : []),
         badge: editFormData.badge,
         tag: editFormData.tag,
         desc: editFormData.desc

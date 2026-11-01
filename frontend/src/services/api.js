@@ -122,24 +122,29 @@ export const api = {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           // Normalize column names
-          const mapped = data.map(p => ({
-            id: p.id,
-            name: p.name,
-            category: p.category,
-            price: Number(p.price),
-            originalPrice: p.original_price ? Number(p.original_price) : null,
-            images: Array.isArray(p.images) && p.images.length > 0 ? p.images : (p.image ? [p.image] : []),
-            image: (Array.isArray(p.images) && p.images[0]) || p.image || '',
-            badge: p.badge,
-            tag: p.tag,
-            sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L'],
-            stock: Number(p.stock),
-            desc: p.desc,
-            rating: p.rating || 4.9,
-            reviewsCount: p.reviews_count || 32
-          }));
+          const mapped = data.map(p => {
+            const imagesList = Array.isArray(p.images) && p.images.length > 0
+              ? p.images
+              : (p.image ? [p.image] : []);
+            return {
+              id: p.id,
+              name: p.name,
+              category: p.category,
+              price: Number(p.price),
+              originalPrice: p.original_price ? Number(p.original_price) : null,
+              images: imagesList,
+              image: p.image || imagesList[0] || '',
+              badge: p.badge,
+              tag: p.tag,
+              sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L'],
+              stock: Number(p.stock),
+              desc: p.desc,
+              rating: p.rating || 4.9,
+              reviewsCount: p.reviews_count || 32
+            };
+          });
           localStorage.setItem('speedo_cache_products', JSON.stringify(mapped));
           return mapped;
         }
@@ -153,12 +158,13 @@ export const api = {
       const res = await fetch(`${API_BASE}/products`);
       if (!res.ok) throw new Error('Network error');
       const json = await res.json();
-      localStorage.setItem('speedo_cache_products', JSON.stringify(json.data));
-      return json.data;
+      const products = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
+      localStorage.setItem('speedo_cache_products', JSON.stringify(products));
+      return products;
     } catch (err) {
       const cached = localStorage.getItem('speedo_cache_products');
       if (cached) return JSON.parse(cached);
-      return FALLBACK_PRODUCTS;
+      return [];
     }
   },
 
@@ -192,22 +198,39 @@ export const api = {
     if (isSupabaseConfigured()) {
       try {
         const sb = getClient();
-        const { data, error } = await sb
+        let { data, error } = await sb
           .from('products')
           .insert([formatted])
           .select();
+
+        // Handle PGRST204: images column missing in Supabase products table
+        if (error && (error.code === 'PGRST204' || (error.message && error.message.includes('images')))) {
+          console.warn('Supabase products table missing images column, falling back to image column only');
+          const fallbackFormatted = { ...formatted };
+          delete fallbackFormatted.images;
+          const retry = await sb
+            .from('products')
+            .insert([fallbackFormatted])
+            .select();
+          data = retry.data;
+          error = retry.error;
+        }
 
         if (!error && data && data[0]) {
           const item = {
             ...data[0],
             originalPrice: data[0].original_price,
-            desc: data[0].desc
+            desc: data[0].desc,
+            images: Array.isArray(data[0].images) && data[0].images.length > 0 ? data[0].images : (data[0].image ? [data[0].image] : imagesList),
+            image: data[0].image || primaryImage
           };
           // Also sync locally
-          const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || JSON.stringify(FALLBACK_PRODUCTS));
+          const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
           cached.unshift(item);
           localStorage.setItem('speedo_cache_products', JSON.stringify(cached));
           return item;
+        } else if (error) {
+          console.warn('Supabase product insert error:', error.message);
         }
       } catch (sbErr) {
         console.warn('Supabase product insert failed, trying Node API:', sbErr);
@@ -216,63 +239,94 @@ export const api = {
 
     // 2. Try Node Backend
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/products`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify(productData)
       });
-      if (!res.ok) throw new Error('Failed to create product');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Failed to create product (${res.status})`);
+      }
       const json = await res.json();
-      return json.data;
-    } catch (err) {
-      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || JSON.stringify(FALLBACK_PRODUCTS));
-      const fallbackItem = {
+      const createdItem = json.data || {
         id: newId,
         ...productData,
-        price: parseFloat(productData.price),
-        rating: 5.0,
-        reviewsCount: 1
+        price: resolvedPrice,
+        originalPrice: resolvedOriginalPrice,
+        image: primaryImage,
+        images: imagesList
       };
-      cached.unshift(fallbackItem);
+      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
+      cached.unshift(createdItem);
       localStorage.setItem('speedo_cache_products', JSON.stringify(cached));
-      return fallbackItem;
+      return createdItem;
+    } catch (err) {
+      console.error('Failed to create product via Node API:', err);
+      throw err;
     }
   },
 
   // Update Product (Supabase -> Node API -> LocalStorage)
   updateProduct: async (id, productData) => {
+    const updatePayload = {
+      name: productData.name,
+      category: productData.category,
+      price: parseFloat(productData.price),
+      original_price: productData.originalPrice ? parseFloat(productData.originalPrice) : null,
+      image: productData.image || (Array.isArray(productData.images) && productData.images[0]) || '',
+      images: Array.isArray(productData.images) ? productData.images.slice(0, 5) : (productData.image ? [productData.image] : []),
+      badge: productData.badge,
+      tag: productData.tag,
+      stock: parseInt(productData.stock, 10),
+      desc: productData.desc
+    };
+
     // 1. Try Supabase
     if (isSupabaseConfigured()) {
       try {
         const sb = getClient();
-        const { data, error } = await sb
+        let { data, error } = await sb
           .from('products')
-          .update({
-            name: productData.name,
-            category: productData.category,
-            price: parseFloat(productData.price),
-            original_price: productData.originalPrice ? parseFloat(productData.originalPrice) : null,
-            image: productData.image || (Array.isArray(productData.images) && productData.images[0]) || '',
-            images: Array.isArray(productData.images) ? productData.images.slice(0, 5) : (productData.image ? [productData.image] : []),
-            badge: productData.badge,
-            tag: productData.tag,
-            stock: parseInt(productData.stock, 10),
-            desc: productData.desc
-          })
+          .update(updatePayload)
           .eq('id', id)
           .select();
 
-        if (!error && data) {
+        // Handle PGRST204: images column missing in Supabase products table
+        if (error && (error.code === 'PGRST204' || (error.message && error.message.includes('images')))) {
+          console.warn('Supabase products table missing images column on update, retrying without images');
+          const fallbackPayload = { ...updatePayload };
+          delete fallbackPayload.images;
+          const retry = await sb
+            .from('products')
+            .update(fallbackPayload)
+            .eq('id', id)
+            .select();
+          data = retry.data;
+          error = retry.error;
+        }
+
+        if (!error && data && data[0]) {
           const updated = {
-            ...productData,
+            ...data[0],
             id,
-            price: parseFloat(productData.price)
+            price: parseFloat(data[0].price),
+            originalPrice: data[0].original_price,
+            images: Array.isArray(data[0].images) && data[0].images.length > 0 ? data[0].images : (data[0].image ? [data[0].image] : updatePayload.images),
+            image: data[0].image || updatePayload.image
           };
-          const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || JSON.stringify(FALLBACK_PRODUCTS));
+          const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
           const idx = cached.findIndex(p => p.id === id);
           if (idx !== -1) cached[idx] = updated;
           localStorage.setItem('speedo_cache_products', JSON.stringify(cached));
           return updated;
+        } else if (error) {
+          console.warn('Supabase product update error:', error.message);
         }
       } catch (sbErr) {
         console.warn('Supabase product update failed:', sbErr);
@@ -281,23 +335,32 @@ export const api = {
 
     // 2. Try Node API
     try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/products/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify(productData)
       });
-      if (!res.ok) throw new Error('Failed to update product');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Failed to update product (${res.status})`);
+      }
       const json = await res.json();
-      return json.data;
-    } catch (err) {
-      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || JSON.stringify(FALLBACK_PRODUCTS));
+      const updated = json.data || { ...productData, id };
+      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
       const index = cached.findIndex(p => p.id === id);
       if (index !== -1) {
-        cached[index] = { ...cached[index], ...productData, price: parseFloat(productData.price) };
+        cached[index] = { ...cached[index], ...updated };
         localStorage.setItem('speedo_cache_products', JSON.stringify(cached));
-        return cached[index];
       }
-      return productData;
+      return updated;
+    } catch (err) {
+      console.error('Failed to update product via Node API:', err);
+      throw err;
     }
   },
 
@@ -313,12 +376,27 @@ export const api = {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/products/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete product');
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/products/${id}`, {
+        method: 'DELETE',
+        headers,
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Failed to delete product (${res.status})`);
+      }
       const json = await res.json();
-      return json.data;
+      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
+      const filtered = cached.filter(p => p.id !== id);
+      localStorage.setItem('speedo_cache_products', JSON.stringify(filtered));
+      return json.data || filtered;
     } catch (err) {
-      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || JSON.stringify(FALLBACK_PRODUCTS));
+      console.warn('Backend product delete error:', err);
+      const cached = JSON.parse(localStorage.getItem('speedo_cache_products') || '[]');
       const filtered = cached.filter(p => p.id !== id);
       localStorage.setItem('speedo_cache_products', JSON.stringify(filtered));
       return filtered;
@@ -1473,9 +1551,13 @@ export const api = {
       }
     }
 
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(`${API_BASE}/categories`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ name: trimmed, description: categoryData.description })
     });
     const json = await res.json();
@@ -1528,9 +1610,13 @@ export const api = {
       }
     }
 
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(`${API_BASE}/categories/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ name: trimmed, description: categoryData.description })
     });
     const json = await res.json();
@@ -1560,7 +1646,14 @@ export const api = {
       }
     }
 
-    const res = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' });
+    const token = sessionStorage.getItem('speedo_admin_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/categories/${id}`, {
+      method: 'DELETE',
+      headers,
+      credentials: 'include'
+    });
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.message || 'Failed to delete category');
     return true;

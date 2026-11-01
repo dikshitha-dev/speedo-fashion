@@ -289,21 +289,27 @@ app.get('/api/products', async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        const mapped = data.map(p => ({
-          id: p.id,
-          name: p.name,
-          category: p.category,
-          price: Number(p.price),
-          originalPrice: p.original_price ? Number(p.original_price) : null,
-          image: p.image,
-          badge: p.badge,
-          tag: p.tag,
-          sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L', 'XL'],
-          stock: Number(p.stock),
-          desc: p.desc,
-          rating: Number(p.rating || 4.9),
-          reviewsCount: Number(p.reviews_count || 12)
-        }));
+        const mapped = data.map(p => {
+          const imagesList = Array.isArray(p.images) && p.images.length > 0
+            ? p.images
+            : (p.image ? [p.image] : []);
+          return {
+            id: p.id,
+            name: p.name,
+            category: p.category,
+            price: Number(p.price),
+            originalPrice: p.original_price ? Number(p.original_price) : null,
+            image: p.image || imagesList[0] || '',
+            images: imagesList,
+            badge: p.badge,
+            tag: p.tag,
+            sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L', 'XL'],
+            stock: Number(p.stock),
+            desc: p.desc,
+            rating: Number(p.rating || 4.9),
+            reviewsCount: Number(p.reviews_count || 12)
+          };
+        });
         memoryProducts = mapped;
         return res.json({ success: true, count: mapped.length, data: mapped });
       } else if (error) {
@@ -349,25 +355,40 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
 
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const insertPayload = {
+        id: newProduct.id,
+        name: newProduct.name,
+        category: newProduct.category,
+        price: newProduct.price,
+        original_price: newProduct.originalPrice,
+        image: newProduct.image,
+        images: newProduct.images,
+        badge: newProduct.badge,
+        tag: newProduct.tag,
+        sizes: newProduct.sizes,
+        stock: newProduct.stock,
+        desc: newProduct.desc,
+        rating: newProduct.rating,
+        reviews_count: newProduct.reviewsCount
+      };
+
+      let { data, error } = await supabase
         .from('products')
-        .insert([{
-          id: newProduct.id,
-          name: newProduct.name,
-          category: newProduct.category,
-          price: newProduct.price,
-          original_price: newProduct.originalPrice,
-          image: newProduct.image,
-          images: newProduct.images,
-          badge: newProduct.badge,
-          tag: newProduct.tag,
-          sizes: newProduct.sizes,
-          stock: newProduct.stock,
-          desc: newProduct.desc,
-          rating: newProduct.rating,
-          reviews_count: newProduct.reviewsCount
-        }])
+        .insert([insertPayload])
         .select();
+
+      // Graceful schema fallback: if 'images' column is missing from Supabase (PGRST204)
+      if (error && (error.code === 'PGRST204' || (error.message && error.message.includes('images')))) {
+        console.warn('Supabase products table missing images column, inserting with single image column');
+        const fallbackPayload = { ...insertPayload };
+        delete fallbackPayload.images;
+        const retry = await supabase
+          .from('products')
+          .insert([fallbackPayload])
+          .select();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (!error && data && data.length > 0) {
         memoryProducts.unshift(newProduct);
@@ -375,9 +396,11 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
         return res.status(201).json({ success: true, message: 'Product created in Supabase', data: newProduct });
       } else if (error) {
         console.error('Supabase product insert error:', error.message);
+        return res.status(400).json({ success: false, message: error.message, code: error.code });
       }
     } catch (err) {
       console.warn('Supabase insert failed:', err.message);
+      return res.status(500).json({ success: false, message: err.message });
     }
   }
 
@@ -404,10 +427,26 @@ app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
 
   if (supabase) {
     try {
-      await supabase
+      let { error } = await supabase
         .from('products')
         .update(updatePayload)
         .eq('id', id);
+
+      // Graceful fallback if 'images' column is missing from Supabase
+      if (error && (error.code === 'PGRST204' || (error.message && error.message.includes('images')))) {
+        console.warn('Supabase products table missing images column on update, retrying without images');
+        const fallbackPayload = { ...updatePayload };
+        delete fallbackPayload.images;
+        const retry = await supabase
+          .from('products')
+          .update(fallbackPayload)
+          .eq('id', id);
+        error = retry.error;
+      }
+
+      if (error) {
+        console.error('Supabase update product error:', error.message);
+      }
     } catch (err) {
       console.warn('Supabase update product failed:', err.message);
     }
