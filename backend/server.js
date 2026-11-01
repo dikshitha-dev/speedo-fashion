@@ -9,6 +9,11 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const HOST = '0.0.0.0';
 
+// Root Status Endpoint
+app.get('/', (req, res) => {
+  res.status(200).send('Speedo Fashion API is running successfully.');
+});
+
 // Health Check Endpoint (Required for Render and uptime monitoring)
 app.get('/health', (req, res) => {
   res.status(200).json({
