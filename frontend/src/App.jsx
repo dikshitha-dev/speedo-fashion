@@ -28,6 +28,9 @@ export default function App() {
     return 'store';
   });
 
+  // Cinematic Logo Intro State (Plays at the very beginning on every page reload/visit)
+  const [isIntroComplete, setIsIntroComplete] = useState(false);
+
   // Admin Portal State
   const [adminUser, setAdminUser] = useState(null);
   const [adminSection, setAdminSection] = useState('dashboard'); // 'dashboard' | 'catlog' | 'reviews'
@@ -339,19 +342,27 @@ export default function App() {
   // 3. RENDER CUSTOMER AUTH GATE (If customer not registered / logged in)
   if (currentView === 'store' && !customer) {
     return (
-      <AuthGatePage
-        onAuthenticated={(authedCust) => {
-          setCustomer(authedCust);
-        }}
-      />
+      <>
+        {/* Cinematic Logo Intro Animation (Plays at the very beginning before login/register) */}
+        {!isIntroComplete && (
+          <AnimatedLogoIntro onComplete={() => setIsIntroComplete(true)} />
+        )}
+        <AuthGatePage
+          onAuthenticated={(authedCust) => {
+            setCustomer(authedCust);
+          }}
+        />
+      </>
     );
   }
 
-  // 4. RENDER CUSTOMER STOREFRONT
+  // 4. RENDER CUSTOMER STOREFRONT (After successful login or if already logged in)
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] text-[#1A1A1A]">
-      {/* Cinematic Logo Intro Animation (Plays on every page reload and fresh visit) */}
-      <AnimatedLogoIntro />
+      {/* Cinematic Logo Intro Animation (Plays at the very beginning before homepage) */}
+      {!isIntroComplete && (
+        <AnimatedLogoIntro onComplete={() => setIsIntroComplete(true)} />
+      )}
 
       {/* Header Navbar */}
       <Navbar
