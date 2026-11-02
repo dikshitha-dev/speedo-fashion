@@ -170,17 +170,13 @@ export default function ProductCatalog({ products, categories = [], onAddToCart,
                       {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map(size => {
                         const sizeStockObj = product.size_stock || product.sizeStock || {};
                         const count = sizeStockObj[size] !== undefined ? Number(sizeStockObj[size]) : (product.sizes?.includes(size) ? (product.stock || 0) : 0);
-                        const isOut = count <= 0;
-                        if (isOut && (!product.sizes || !product.sizes.includes(size))) return null;
+                        // If an admin sets size quantity to 0, completely hide that size from customer product card
+                        if (count <= 0) return null;
                         return (
                           <span 
                             key={size} 
-                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 border ${
-                              isOut 
-                                ? 'bg-gray-100 border-gray-200 text-gray-400 line-through' 
-                                : 'bg-gray-100 border-gray-300 text-[#1A1A1A]'
-                            }`}
-                            title={isOut ? `Size ${size}: Out of Stock` : count <= 5 ? `Size ${size}: Only ${count} left` : `Size ${size}`}
+                            className="text-[10px] font-mono font-bold px-1.5 py-0.5 border bg-gray-100 border-gray-300 text-[#1A1A1A]"
+                            title={count <= 5 ? `Size ${size}: Only ${count} left` : `Size ${size}`}
                           >
                             {size}
                           </span>

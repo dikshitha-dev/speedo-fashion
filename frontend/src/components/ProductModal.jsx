@@ -157,12 +157,28 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
 
   const rawStockObj = product?.size_stock || product?.sizeStock || {};
   const standardSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-  const displaySizes = Array.isArray(product?.sizes) && product.sizes.length > 0
-    ? Array.from(new Set([...product.sizes, ...standardSizes.filter(sz => (rawStockObj[sz] || 0) > 0)]))
+
+  // Helper to determine exact size-specific stock quantity
+  const getStockForSize = (sz) => {
+    if (rawStockObj && rawStockObj[sz] !== undefined) {
+      return Math.max(0, parseInt(rawStockObj[sz], 10) || 0);
+    }
+    if (product?.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+      return product.sizes.includes(sz) ? Math.max(0, parseInt(product.stock, 10) || 0) : 0;
+    }
+    return Math.max(0, parseInt(product?.stock, 10) || 0);
+  };
+
+  // Base list of candidate sizes
+  const candidateSizes = Array.isArray(product?.sizes) && product.sizes.length > 0
+    ? Array.from(new Set([...product.sizes, ...standardSizes]))
     : standardSizes;
 
-  const isAllSoldOut = (product?.stock <= 0) || (Object.keys(rawStockObj).length > 0 && Object.values(rawStockObj).every(q => Number(q) <= 0));
-  const selectedSizeStock = selectedSize ? (rawStockObj[selectedSize] !== undefined ? Number(rawStockObj[selectedSize]) : (product?.stock || 0)) : 0;
+  // If an admin sets a size quantity to 0, completely hide that size from customer product page
+  const displaySizes = candidateSizes.filter((sz) => getStockForSize(sz) > 0);
+
+  const isAllSoldOut = displaySizes.length === 0;
+  const selectedSizeStock = selectedSize ? getStockForSize(selectedSize) : 0;
   const maxAvailableQty = selectedSize ? Math.max(1, selectedSizeStock) : 10;
 
   const handleAdd = () => {
@@ -427,48 +443,45 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
             )}
 
             {/* Size Selector Pills with Size-Wise Stock Display */}
-            <div className="flex flex-wrap gap-2.5">
-              {displaySizes.map((size) => {
-                const stockQty = rawStockObj[size] !== undefined ? Number(rawStockObj[size]) : (product.sizes?.includes(size) ? (product.stock || 0) : 0);
-                const isSoldOut = stockQty <= 0;
+            {displaySizes.length > 0 ? (
+              <div className="flex flex-wrap gap-2.5">
+                {displaySizes.map((size) => {
+                  const stockQty = getStockForSize(size);
 
-                return (
-                  <button
-                    key={size}
-                    type="button"
-                    disabled={isSoldOut}
-                    onClick={() => {
-                      if (isSoldOut) return;
-                      setSelectedSize(size);
-                      setSizeError(false);
-                      if (qty > stockQty) setQty(Math.max(1, stockQty));
-                    }}
-                    className={`h-12 min-w-[56px] px-3 py-1 text-xs font-mono font-bold rounded border transition-all flex flex-col items-center justify-center relative ${
-                      isSoldOut
-                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50 line-through'
-                        : selectedSize === size
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSize(size);
+                        setSizeError(false);
+                        if (qty > stockQty) setQty(Math.max(1, stockQty));
+                      }}
+                      className={`h-12 min-w-[56px] px-3 py-1 text-xs font-mono font-bold rounded border transition-all flex flex-col items-center justify-center relative ${
+                        selectedSize === size
                           ? 'bg-[#111111] text-white border-[#111111] ring-2 ring-[#E53935] shadow-sm cursor-pointer'
                           : sizeError
                             ? 'bg-white text-gray-800 border-[#E53935] hover:bg-red-50 cursor-pointer'
                             : 'bg-white text-gray-800 border-gray-300 hover:border-black cursor-pointer'
-                    }`}
-                  >
-                    <span className="font-bold">{size}</span>
-                    {isSoldOut ? (
-                      <span className="text-[8.5px] font-normal text-gray-400 tracking-tight">
-                        Out of Stock
-                      </span>
-                    ) : stockQty <= 5 ? (
-                      <span className={`text-[8.5px] font-bold tracking-tight ${
-                        selectedSize === size ? 'text-red-200' : 'text-[#E53935]'
-                      }`}>
-                        Only {stockQty} left
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
+                      }`}
+                    >
+                      <span className="font-bold">{size}</span>
+                      {stockQty <= 5 && (
+                        <span className={`text-[8.5px] font-bold tracking-tight ${
+                          selectedSize === size ? 'text-red-200' : 'text-[#E53935]'
+                        }`}>
+                          Only {stockQty} left
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-3 bg-gray-100 border border-gray-200 text-gray-600 text-xs font-mono rounded">
+                This item is currently unavailable in all sizes.
+              </div>
+            )}
 
             {/* Validation Error Message */}
             {sizeError && (
@@ -774,48 +787,45 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-2">
-                    {displaySizes.map((s) => {
-                      const stockQty = rawStockObj[s] !== undefined ? Number(rawStockObj[s]) : (product.sizes?.includes(s) ? (product.stock || 0) : 0);
-                      const isSoldOut = stockQty <= 0;
+                  {displaySizes.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {displaySizes.map((s) => {
+                        const stockQty = getStockForSize(s);
 
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          disabled={isSoldOut}
-                          onClick={() => {
-                            if (isSoldOut) return;
-                            setSelectedSize(s);
-                            setSizeError(false);
-                            if (qty > stockQty) setQty(Math.max(1, stockQty));
-                          }}
-                          className={`min-w-14 py-1.5 px-3 text-xs font-mono font-bold border transition-all flex flex-col items-center justify-center ${
-                            isSoldOut
-                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50 line-through'
-                              : selectedSize === s
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSize(s);
+                              setSizeError(false);
+                              if (qty > stockQty) setQty(Math.max(1, stockQty));
+                            }}
+                            className={`min-w-14 py-1.5 px-3 text-xs font-mono font-bold border transition-all flex flex-col items-center justify-center ${
+                              selectedSize === s
                                 ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-origami-coral scale-105 ring-2 ring-[#FF6B6B] cursor-pointer'
                                 : sizeError
                                   ? 'bg-white text-[#1A1A1A] border-[#FF6B6B] hover:border-[#1A1A1A] hover:bg-red-50/50 cursor-pointer'
                                   : 'bg-white text-[#1A1A1A] border-[#B0B0B0] hover:border-[#1A1A1A] hover:bg-gray-50 cursor-pointer'
-                          }`}
-                        >
-                          <span className="font-bold">{s}</span>
-                          {isSoldOut ? (
-                            <span className="text-[8.5px] font-normal text-gray-400">
-                              Out of Stock
-                            </span>
-                          ) : stockQty <= 5 ? (
-                            <span className={`text-[8.5px] font-bold ${
-                              selectedSize === s ? 'text-red-200' : 'text-[#FF6B6B]'
-                            }`}>
-                              Only {stockQty} left
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
+                            }`}
+                          >
+                            <span className="font-bold">{s}</span>
+                            {stockQty <= 5 && (
+                              <span className={`text-[8.5px] font-bold ${
+                                selectedSize === s ? 'text-red-200' : 'text-[#FF6B6B]'
+                              }`}>
+                                Only {stockQty} left
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-gray-100 border border-gray-200 text-gray-600 text-xs font-mono">
+                      This item is currently unavailable in all sizes.
+                    </div>
+                  )}
 
                   {sizeError && (
                     <div className="mt-2.5 p-2 bg-red-50 border border-red-200 text-[#FF6B6B] text-xs font-mono font-bold flex items-center gap-1.5 animate-bounce">
@@ -881,14 +891,18 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                 <button 
                   type="button"
                   onClick={handleAdd}
-                  disabled={addedNotice}
-                  className={`w-full py-3.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 clip-origami-btn shadow-origami-bold transition-all cursor-pointer ${
-                    addedNotice 
-                      ? 'bg-[#A8D5BA] text-[#1A1A1A]' 
-                      : 'bg-[#FF6B6B] hover:bg-[#fa5555] text-white'
+                  disabled={addedNotice || isAllSoldOut}
+                  className={`w-full py-3.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 clip-origami-btn shadow-origami-bold transition-all ${
+                    isAllSoldOut
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : addedNotice 
+                        ? 'bg-[#A8D5BA] text-[#1A1A1A] cursor-pointer' 
+                        : 'bg-[#FF6B6B] hover:bg-[#fa5555] text-white cursor-pointer'
                   }`}
                 >
-                  {addedNotice ? (
+                  {isAllSoldOut ? (
+                    <span>OUT OF STOCK</span>
+                  ) : addedNotice ? (
                     <>
                       <CheckCircle className="w-4 h-4" />
                       <span>Added to Cart!</span>
@@ -896,7 +910,7 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                   ) : (
                     <>
                       <ShoppingBag className="w-4 h-4" />
-                      <span>ADD TO CART</span>
+                      <span>{selectedSize ? `ADD TO CART • ${selectedSize}` : 'ADD TO CART'}</span>
                     </>
                   )}
                 </button>

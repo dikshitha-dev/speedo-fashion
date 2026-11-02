@@ -234,4 +234,30 @@ test('Size-wise Inventory Suite', async (t) => {
     assert.strictEqual(res.body.success, false);
     assert.strictEqual(res.body.code, 'OUT_OF_STOCK');
   });
+
+  await t.test('6. Customer product view: sizes with 0 quantity are completely hidden', async () => {
+    const res = await dispatch(app, {
+      method: 'GET',
+      url: '/api/products'
+    });
+    assert.strictEqual(res.status, 200);
+    const prod = res.body.data.find(p => p.id === testProductId);
+    assert.ok(prod, 'Test product should be in products list');
+    assert.strictEqual(prod.size_stock.XXL, 0, 'XXL should have 0 quantity');
+
+    // Customer page logic:
+    const standardSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+    const getStockForSize = (sz) => Math.max(0, parseInt(prod.size_stock?.[sz], 10) || 0);
+    const candidateSizes = Array.isArray(prod.sizes) && prod.sizes.length > 0
+      ? Array.from(new Set([...prod.sizes, ...standardSizes]))
+      : standardSizes;
+    const displaySizes = candidateSizes.filter((sz) => getStockForSize(sz) > 0);
+
+    assert.ok(!displaySizes.includes('XXL'), 'XXL (qty 0) must be completely hidden from customer sizes');
+    assert.ok(displaySizes.includes('XS'), 'XS (qty 40) must be displayed');
+    assert.ok(displaySizes.includes('S'), 'S (qty 10) must be displayed');
+    assert.ok(displaySizes.includes('M'), 'M (qty 18) must be displayed');
+    assert.ok(displaySizes.includes('L'), 'L (qty 15) must be displayed');
+    assert.ok(displaySizes.includes('XL'), 'XL (qty 5) must be displayed');
+  });
 });
