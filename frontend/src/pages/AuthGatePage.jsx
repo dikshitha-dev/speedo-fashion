@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { User, AlertCircle, ArrowRight } from 'lucide-react';
-import { getClient, isSupabaseConfigured } from '../services/supabaseClient';
+import { api } from '../services/api';
 
 export default function AuthGatePage({ onAuthenticated }) {
   const [name, setName] = useState('');
@@ -54,67 +54,11 @@ export default function AuthGatePage({ onAuthenticated }) {
     setIsSubmitting(true);
 
     try {
-      let activeCustomer = {
+      // Authenticate customer securely via backend API (service role bypasses RLS safely on server)
+      const activeCustomer = await api.customerAuth({
         name: trimmedName,
-        phone: phone,
-        saved_address: '',
-        city: '',
-        state: '',
-        pincode: ''
-      };
-
-      // If Supabase is connected, retrieve existing customer or upsert profile
-      if (isSupabaseConfigured()) {
-        try {
-          const supabase = getClient();
-          if (supabase) {
-            // Check for existing profile
-            const { data: existing } = await supabase
-              .from('customers')
-              .select('*')
-              .eq('phone', phone)
-              .maybeSingle();
-
-            if (existing) {
-              // Update name if changed, keep existing saved address
-              const { data: updated } = await supabase
-                .from('customers')
-                .update({
-                  name: trimmedName,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('phone', phone)
-                .select()
-                .single();
-
-              activeCustomer = updated || existing;
-            } else {
-              // Insert new customer record
-              const { data: inserted, error: insertErr } = await supabase
-                .from('customers')
-                .insert([{
-                  phone: phone,
-                  name: trimmedName,
-                  saved_address: '',
-                  city: '',
-                  state: '',
-                  pincode: ''
-                }])
-                .select()
-                .single();
-
-              if (!insertErr && inserted) {
-                activeCustomer = inserted;
-              }
-            }
-          }
-        } catch (sbErr) {
-          console.warn('Supabase customer sync warning:', sbErr);
-        }
-      }
-
-      // Persist customer locally
-      localStorage.setItem('speedo_customer', JSON.stringify(activeCustomer));
+        phone: phone
+      });
 
       // Continue into the store
       if (onAuthenticated) {

@@ -85,7 +85,7 @@ export default function CustomerModal({
     setAuthError('');
 
     try {
-      const activeCustomer = await api.verifyCustomerOtp(cleanPhone, null, name.trim());
+      const activeCustomer = await api.customerAuth({ name: name.trim(), phone: cleanPhone });
       onLoginSuccess(activeCustomer);
       setView('profile');
     } catch (err) {

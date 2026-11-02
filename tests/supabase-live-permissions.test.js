@@ -157,5 +157,20 @@ test('Live Supabase Database Permissions & RLS Suite (Direct PostgREST API)', as
     const isBlocked = [401, 403, 404].includes(res.status) || (res.status === 200 && (await res.json()).length === 0);
     assert.ok(isBlocked, `Anon DELETE on orders must be blocked (Got HTTP ${res.status})`);
   });
+
+  // 6. CUSTOMER DATA PROTECTION (RLS ENFORCEMENT - PREVENTS 42501 ON STOREFRONT BY ROUTING THROUGH BACKEND)
+  await t.test('6. Customers table: Direct anon access is strictly denied by PostgreSQL RLS', async () => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/customers?select=*`, {
+      method: 'GET',
+      headers: anonHeaders
+    });
+
+    // Directly querying customers via anon key must return 401 Unauthorized, 403 Forbidden, or 404 / 42501 error
+    const isBlocked = [401, 403, 404].includes(res.status) || (res.status === 200 && (await res.json()).length === 0);
+    assert.ok(
+      isBlocked,
+      `Direct anon access to customers table must be blocked by RLS policies (Got HTTP ${res.status})`
+    );
+  });
 });
 

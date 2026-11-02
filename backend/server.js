@@ -1003,66 +1003,98 @@ app.get('/api/admin/stats', requireAdminAuth, async (req, res) => {
   });
 });
 
+// --- CUSTOMER SESSION TOKEN SECURITY (HMAC SHA-256) ---
+const CUSTOMER_SESSION_SECRET = process.env.CUSTOMER_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET || 'speedo_customer_secret_key_2026';
+
+function createCustomerToken(customer) {
+  const cleanPhone = String(customer.phone || '').replace(/\D/g, '').slice(-10);
+  const payload = {
+    phone: cleanPhone,
+    name: customer.name || 'Valued Customer',
+    id: customer.id || null,
+    iat: Date.now(),
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
+  };
+  const dataStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', CUSTOMER_SESSION_SECRET).update(dataStr).digest('base64url');
+  return `${dataStr}.${signature}`;
+}
+
+function verifyCustomerToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [dataStr, signature] = parts;
+  const expected = crypto.createHmac('sha256', CUSTOMER_SESSION_SECRET).update(dataStr).digest('base64url');
+  if (signature !== expected) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(dataStr, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Date.now()) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+function requireCustomerOrAdminAuth(req, res, next) {
+  const cookies = parseCookies(req);
+  const authHeader = req.headers.authorization;
+  const bearer = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const token = bearer || cookies.speedo_customer_session || req.headers['x-customer-token'];
+
+  // 1. Check if caller is authenticated admin
+  const adminToken = bearer || cookies.speedo_admin_session;
+  if (adminToken && adminSessions.has(adminToken)) {
+    const adminSession = adminSessions.get(adminToken);
+    if (adminSession.expiresAt > Date.now()) {
+      req.isAdmin = true;
+      req.adminUser = adminSession;
+      return next();
+    }
+  }
+
+  // 2. Check customer token
+  const customerPayload = verifyCustomerToken(token);
+  if (customerPayload) {
+    req.customer = customerPayload;
+    req.isAdmin = false;
+    return next();
+  }
+
+  return res.status(401).json({
+    success: false,
+    code: 'UNAUTHORIZED',
+    message: 'Customer authentication required. Please log in with your phone and name.'
+  });
+}
+
+function checkCustomerPhoneAccess(req, targetPhone) {
+  if (req.isAdmin) return true;
+  if (!req.customer || !req.customer.phone) return false;
+  const callerPhone = String(req.customer.phone).replace(/\D/g, '').slice(-10);
+  const requestedPhone = String(targetPhone).replace(/\D/g, '').slice(-10);
+  return callerPhone === requestedPhone;
+}
+
 // --- CUSTOMER ACCOUNT & SAVED ADDRESS ROUTES (SUPABASE DATABASE) ---
 
-// 1. Send Phone OTP
-app.post('/api/customer/send-otp', async (req, res) => {
-  const { phone } = req.body;
-  if (!phone || !phone.trim()) {
-    return res.status(400).json({ success: false, message: 'Phone number is required' });
+// 1. Customer Authentication / Registration (Custom Login with Name + 10-digit Phone)
+app.post(['/api/customer/auth', '/api/customer/login'], async (req, res) => {
+  const { name, phone } = req.body;
+  if (!phone || typeof phone !== 'string') {
+    return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required' });
   }
 
-  const cleanPhone = phone.trim().replace(/\s+/g, '');
-  // Generate 6-digit OTP (e.g. 842190)
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  otpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
-
-  console.log(`[Customer Auth] OTP generated for ${cleanPhone}: ${otp}`);
-
-  // Also query if customer already exists to return greeting flag
-  let existingCustomer = null;
-  if (supabase) {
-    try {
-      const { data } = await supabase.from('customers').select('*').eq('phone', cleanPhone).maybeSingle();
-      existingCustomer = data;
-    } catch (e) {}
+  const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+  if (cleanPhone.length !== 10) {
+    return res.status(400).json({ success: false, message: 'Mobile number must contain 10 digits' });
   }
 
-  return res.json({
-    success: true,
-    message: `OTP sent to ${cleanPhone}`,
-    otp: otp, // Returned for instant testing and simulated SMS banner in UI
-    isExisting: !!existingCustomer,
-    customerName: existingCustomer ? existingCustomer.name : null
-  });
-});
-
-// 2. Verify Phone OTP & Register/Login
-app.post('/api/customer/verify-otp', async (req, res) => {
-  const { phone, otp, name } = req.body;
-  if (!phone || !otp) {
-    return res.status(400).json({ success: false, message: 'Phone and OTP are required' });
-  }
-
-  const cleanPhone = phone.trim().replace(/\s+/g, '');
-  const cleanOtp = String(otp).trim();
-
-  // Validate OTP (match stored OTP or master test OTP '123456')
-  const record = otpStore.get(cleanPhone);
-  const isValid = cleanOtp === '123456' || (record && record.otp === cleanOtp && record.expiresAt > Date.now());
-
-  if (!isValid) {
-    return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
-  }
-
-  // Clear OTP once used
-  otpStore.delete(cleanPhone);
-
+  const trimmedName = (name && typeof name === 'string') ? name.trim() : '';
   let customer = null;
 
   if (supabase) {
     try {
-      // Check if customer already exists
       const { data: existing, error: fetchErr } = await supabase
         .from('customers')
         .select('*')
@@ -1070,11 +1102,10 @@ app.post('/api/customer/verify-otp', async (req, res) => {
         .maybeSingle();
 
       if (existing) {
-        // If customer provided a updated name upon login, update it
-        if (name && name.trim() && name.trim() !== existing.name) {
-          const { data: updated } = await supabase
+        if (trimmedName && trimmedName !== existing.name) {
+          const { data: updated, error: updateErr } = await supabase
             .from('customers')
-            .update({ name: name.trim(), updated_at: new Date().toISOString() })
+            .update({ name: trimmedName, updated_at: new Date().toISOString() })
             .eq('phone', cleanPhone)
             .select()
             .single();
@@ -1083,10 +1114,9 @@ app.post('/api/customer/verify-otp', async (req, res) => {
           customer = existing;
         }
       } else {
-        // Create new customer account
         const newCustomerData = {
           phone: cleanPhone,
-          name: (name && name.trim()) ? name.trim() : 'Valued Customer',
+          name: trimmedName || 'Valued Customer',
           saved_address: '',
           city: '',
           state: '',
@@ -1105,58 +1135,194 @@ app.post('/api/customer/verify-otp', async (req, res) => {
           console.error('Supabase customer insert error:', insertErr.message);
         } else {
           customer = created;
-          console.log(`[Supabase Database] New customer registered: ${customer.name} (${customer.phone})`);
+          console.log(`[Supabase Database] Registered customer: ${customer.name} (${customer.phone})`);
         }
       }
     } catch (err) {
-      console.warn('Supabase customer auth failed, using memory:', err.message);
+      console.warn('Supabase customer auth failed, falling back to memory:', err.message);
     }
   }
 
   if (!customer) {
     const existing = memoryCustomers.find(c => c.phone === cleanPhone);
     if (existing) {
-      if (name && name.trim()) existing.name = name.trim();
+      if (trimmedName) existing.name = trimmedName;
       customer = existing;
     } else {
       customer = {
         id: Date.now(),
         phone: cleanPhone,
-        name: (name && name.trim()) ? name.trim() : 'Valued Customer',
+        name: trimmedName || 'Valued Customer',
         saved_address: '',
         city: '',
         state: '',
-        pincode: ''
+        pincode: '',
+        created_at: new Date().toISOString()
       };
       memoryCustomers.push(customer);
     }
   }
 
-  res.json({
+  const token = createCustomerToken(customer);
+  res.setHeader('Set-Cookie', `speedo_customer_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}`);
+
+  return res.json({
     success: true,
-    message: 'Authenticated successfully',
-    customer
+    message: 'Customer session authenticated successfully',
+    customer,
+    token
   });
 });
 
-// 3. Update Customer Address & Profile
-app.put('/api/customer/profile', async (req, res) => {
+// 2. Send Phone OTP
+app.post('/api/customer/send-otp', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone || !phone.trim()) {
+    return res.status(400).json({ success: false, message: 'Phone number is required' });
+  }
+
+  const cleanPhone = phone.trim().replace(/\D/g, '').slice(-10);
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  otpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+  let existingCustomer = null;
+  if (supabase) {
+    try {
+      const { data } = await supabase.from('customers').select('*').eq('phone', cleanPhone).maybeSingle();
+      existingCustomer = data;
+    } catch (e) {}
+  }
+
+  return res.json({
+    success: true,
+    message: `OTP sent to ${cleanPhone}`,
+    otp,
+    isExisting: !!existingCustomer,
+    customerName: existingCustomer ? existingCustomer.name : null
+  });
+});
+
+// 3. Verify Phone OTP & Register/Login
+app.post('/api/customer/verify-otp', async (req, res) => {
+  const { phone, otp, name } = req.body;
+  if (!phone) {
+    return res.status(400).json({ success: false, message: 'Phone is required' });
+  }
+
+  const cleanPhone = phone.trim().replace(/\D/g, '').slice(-10);
+  const cleanOtp = otp ? String(otp).trim() : '';
+
+  if (cleanOtp) {
+    const record = otpStore.get(cleanPhone);
+    const isValid = cleanOtp === '123456' || (record && record.otp === cleanOtp && record.expiresAt > Date.now());
+    if (!isValid) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+    }
+    otpStore.delete(cleanPhone);
+  }
+
+  let customer = null;
+  const trimmedName = (name && typeof name === 'string') ? name.trim() : '';
+
+  if (supabase) {
+    try {
+      const { data: existing } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+
+      if (existing) {
+        if (trimmedName && trimmedName !== existing.name) {
+          const { data: updated } = await supabase
+            .from('customers')
+            .update({ name: trimmedName, updated_at: new Date().toISOString() })
+            .eq('phone', cleanPhone)
+            .select()
+            .single();
+          customer = updated || existing;
+        } else {
+          customer = existing;
+        }
+      } else {
+        const { data: created } = await supabase
+          .from('customers')
+          .insert([{
+            phone: cleanPhone,
+            name: trimmedName || 'Valued Customer',
+            saved_address: '',
+            city: '',
+            state: '',
+            pincode: '',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }])
+          .select()
+          .single();
+        customer = created;
+      }
+    } catch (err) {
+      console.warn('Supabase customer auth failed:', err.message);
+    }
+  }
+
+  if (!customer) {
+    const existing = memoryCustomers.find(c => c.phone === cleanPhone);
+    if (existing) {
+      if (trimmedName) existing.name = trimmedName;
+      customer = existing;
+    } else {
+      customer = {
+        id: Date.now(),
+        phone: cleanPhone,
+        name: trimmedName || 'Valued Customer',
+        saved_address: '',
+        city: '',
+        state: '',
+        pincode: '',
+        created_at: new Date().toISOString()
+      };
+      memoryCustomers.push(customer);
+    }
+  }
+
+  const token = createCustomerToken(customer);
+  res.setHeader('Set-Cookie', `speedo_customer_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}`);
+
+  return res.json({
+    success: true,
+    message: 'Authenticated successfully',
+    customer,
+    token
+  });
+});
+
+// 4. Update Customer Address & Profile (Protected by Customer or Admin Auth)
+app.put('/api/customer/profile', requireCustomerOrAdminAuth, async (req, res) => {
   const { phone, name, email, saved_address, city, state, pincode } = req.body;
   if (!phone) {
     return res.status(400).json({ success: false, message: 'Customer phone is required' });
   }
 
-  const cleanPhone = phone.trim().replace(/\s+/g, '');
+  if (!checkCustomerPhoneAccess(req, phone)) {
+    return res.status(403).json({
+      success: false,
+      code: 'FORBIDDEN',
+      message: 'Access denied: You are only permitted to update your own profile.'
+    });
+  }
+
+  const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
   const updatePayload = {
     updated_at: new Date().toISOString()
   };
 
-  if (name !== undefined) updatePayload.name = name.trim();
-  if (email !== undefined) updatePayload.email = email.trim();
-  if (saved_address !== undefined) updatePayload.saved_address = saved_address.trim();
-  if (city !== undefined) updatePayload.city = city.trim();
-  if (state !== undefined) updatePayload.state = state.trim();
-  if (pincode !== undefined) updatePayload.pincode = pincode.trim();
+  if (name !== undefined) updatePayload.name = String(name).trim();
+  if (email !== undefined) updatePayload.email = String(email).trim();
+  if (saved_address !== undefined) updatePayload.saved_address = String(saved_address).trim();
+  if (city !== undefined) updatePayload.city = String(city).trim();
+  if (state !== undefined) updatePayload.state = String(state).trim();
+  if (pincode !== undefined) updatePayload.pincode = String(pincode).trim();
 
   let customer = null;
 
@@ -1171,7 +1337,7 @@ app.put('/api/customer/profile', async (req, res) => {
 
       if (!error && data) {
         customer = data;
-        console.log(`[Supabase Database] Customer address updated for ${cleanPhone}`);
+        console.log(`[Supabase Database] Customer profile updated for ${cleanPhone}`);
       } else if (error) {
         console.warn('Supabase customer update error:', error.message);
       }
@@ -1191,16 +1357,25 @@ app.put('/api/customer/profile', async (req, res) => {
     }
   }
 
-  res.json({
+  return res.json({
     success: true,
-    message: 'Customer profile & address updated successfully',
+    message: 'Customer profile updated successfully',
     customer
   });
 });
 
-// 4. Get Customer Profile
-app.get('/api/customer/:phone', async (req, res) => {
-  const cleanPhone = req.params.phone.trim().replace(/\s+/g, '');
+// 5. Get Customer Profile (Protected by Customer or Admin Auth)
+app.get('/api/customer/:phone', requireCustomerOrAdminAuth, async (req, res) => {
+  const targetPhone = req.params.phone;
+  if (!checkCustomerPhoneAccess(req, targetPhone)) {
+    return res.status(403).json({
+      success: false,
+      code: 'FORBIDDEN',
+      message: 'Access denied: You are only permitted to access your own customer profile.'
+    });
+  }
+
+  const cleanPhone = String(targetPhone).replace(/\D/g, '').slice(-10);
 
   if (supabase) {
     try {
@@ -1223,19 +1398,28 @@ app.get('/api/customer/:phone', async (req, res) => {
     return res.json({ success: true, customer: found });
   }
 
-  res.status(404).json({ success: false, message: 'Customer not found' });
+  return res.status(404).json({ success: false, message: 'Customer record not found' });
 });
 
-// 5. Get Customer Orders
-app.get('/api/customer/orders/:phone', async (req, res) => {
-  const cleanPhone = req.params.phone.trim().replace(/\s+/g, '');
+// 6. Get Customer Orders (Protected by Customer or Admin Auth)
+app.get('/api/customer/orders/:phone', requireCustomerOrAdminAuth, async (req, res) => {
+  const targetPhone = req.params.phone;
+  if (!checkCustomerPhoneAccess(req, targetPhone)) {
+    return res.status(403).json({
+      success: false,
+      code: 'FORBIDDEN',
+      message: 'Access denied: You are only permitted to view your own order history.'
+    });
+  }
+
+  const cleanPhone = String(targetPhone).replace(/\D/g, '').slice(-10);
 
   if (supabase) {
     try {
       const { data, error } = await supabase
         .from('orders')
         .select('*')
-        .or(`customer_phone.eq.${cleanPhone},customer_phone.ilike.%${cleanPhone.slice(-10)}%`)
+        .or(`customer_phone.eq.${cleanPhone},customer_phone.ilike.%${cleanPhone}%`)
         .order('created_at', { ascending: false });
 
       if (!error && data) {
@@ -1246,8 +1430,89 @@ app.get('/api/customer/orders/:phone', async (req, res) => {
     }
   }
 
-  const filtered = memoryOrders.filter(o => o.customerPhone && o.customerPhone.includes(cleanPhone.slice(-10)));
-  res.json({ success: true, orders: filtered });
+  const filtered = memoryOrders.filter(o => o.customerPhone && o.customerPhone.includes(cleanPhone));
+  return res.json({ success: true, orders: filtered });
+});
+
+// 7. Admin: Get All Customers (Protected by Admin Auth)
+app.get('/api/admin/customers', requireAdminAuth, async (req, res) => {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return res.json({ success: true, count: data.length, customers: data });
+      } else if (error) {
+        console.warn('Supabase admin get customers error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase admin get customers query failed:', err.message);
+    }
+  }
+
+  return res.json({ success: true, count: memoryCustomers.length, customers: memoryCustomers });
+});
+
+// 8. Admin: Update Customer Record (Protected by Admin Auth)
+app.put('/api/admin/customers/:phone', requireAdminAuth, async (req, res) => {
+  const cleanPhone = String(req.params.phone).replace(/\D/g, '').slice(-10);
+  const updates = req.body;
+  updates.updated_at = new Date().toISOString();
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .update(updates)
+        .eq('phone', cleanPhone)
+        .select()
+        .single();
+
+      if (!error && data) {
+        return res.json({ success: true, message: 'Customer updated by administrator', customer: data });
+      }
+    } catch (err) {
+      console.warn('Supabase admin update customer error:', err.message);
+    }
+  }
+
+  const idx = memoryCustomers.findIndex(c => c.phone === cleanPhone);
+  if (idx !== -1) {
+    memoryCustomers[idx] = { ...memoryCustomers[idx], ...updates };
+    return res.json({ success: true, message: 'Customer updated', customer: memoryCustomers[idx] });
+  }
+
+  return res.status(404).json({ success: false, message: 'Customer record not found' });
+});
+
+// 9. Admin: Delete Customer Record (Protected by Admin Auth)
+app.delete('/api/admin/customers/:phone', requireAdminAuth, async (req, res) => {
+  const cleanPhone = String(req.params.phone).replace(/\D/g, '').slice(-10);
+
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .delete()
+        .eq('phone', cleanPhone);
+
+      if (!error) {
+        console.log(`[Supabase Database] Admin deleted customer ${cleanPhone}`);
+      }
+    } catch (err) {
+      console.warn('Supabase admin delete customer error:', err.message);
+    }
+  }
+
+  const idx = memoryCustomers.findIndex(c => c.phone === cleanPhone);
+  if (idx !== -1) {
+    memoryCustomers.splice(idx, 1);
+  }
+
+  return res.json({ success: true, message: `Customer ${cleanPhone} removed successfully` });
 });
 
 // --- CUSTOMER FEEDBACK & REVIEWS MANAGEMENT (SUPABASE + MEMORY) ---

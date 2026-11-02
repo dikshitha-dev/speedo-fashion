@@ -453,9 +453,15 @@ export const api = {
 
     // 1. Always attempt through the backend API first (handles atomic stock reduction & validation)
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const customerToken = localStorage.getItem('speedo_customer_token');
+      if (customerToken) {
+        headers['Authorization'] = `Bearer ${customerToken}`;
+      }
       const res = await fetch(`${API_BASE}/orders`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify(orderData)
       });
       
@@ -1614,13 +1620,77 @@ export const api = {
   },
 
   // --- CUSTOMER ACCOUNT & ADDRESS MANAGEMENT (SUPABASE + API) ---
+  // Authenticate Customer (Full Name + 10-digit Mobile Number via Secure Backend API)
+  customerAuth: async ({ name, phone }) => {
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
+    try {
+      const res = await fetch(`${API_BASE}/customer/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: name ? name.trim() : '', phone: cleanPhone })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || 'Customer authentication failed');
+      }
+      if (json.token) {
+        localStorage.setItem('speedo_customer_token', json.token);
+      }
+      if (json.customer) {
+        localStorage.setItem('speedo_customer', JSON.stringify(json.customer));
+      }
+      return json.customer;
+    } catch (err) {
+      console.warn('Backend customerAuth failed, falling back to local session:', err.message);
+      const localCustomer = {
+        phone: cleanPhone,
+        name: name ? name.trim() : 'Valued Customer',
+        saved_address: '',
+        city: '',
+        state: '',
+        pincode: ''
+      };
+      localStorage.setItem('speedo_customer', JSON.stringify(localCustomer));
+      return localCustomer;
+    }
+  },
+
+  // Get Customer Profile (Strictly via Authenticated Backend API)
+  getCustomerProfile: async (phone) => {
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('speedo_customer_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/customer/${cleanPhone}`, {
+        headers,
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.customer) {
+          localStorage.setItem('speedo_customer', JSON.stringify(json.customer));
+          return json.customer;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend getCustomerProfile failed:', e.message);
+    }
+
+    const saved = localStorage.getItem('speedo_customer');
+    return saved ? JSON.parse(saved) : null;
+  },
+
   sendCustomerOtp: async (phone) => {
-    const cleanPhone = phone.trim().replace(/\s+/g, '');
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
     
     try {
       const res = await fetch(`${API_BASE}/customer/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ phone: cleanPhone })
       });
       if (res.ok) {
@@ -1630,7 +1700,6 @@ export const api = {
       console.warn('Backend send-otp failed, falling back to local simulation:', e.message);
     }
 
-    // Local simulation fallback
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     sessionStorage.setItem(`speedo_otp_${cleanPhone}`, otp);
     return {
@@ -1641,77 +1710,30 @@ export const api = {
   },
 
   verifyCustomerOtp: async (phone, otp, name) => {
-    const cleanPhone = phone.trim().replace(/\s+/g, '');
-    const cleanOtp = String(otp).trim();
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
+    const cleanOtp = otp ? String(otp).trim() : '';
 
-    // 1. Try Backend API
     try {
       const res = await fetch(`${API_BASE}/customer/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ phone: cleanPhone, otp: cleanOtp, name })
       });
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.customer) {
+          if (json.token) {
+            localStorage.setItem('speedo_customer_token', json.token);
+          }
           localStorage.setItem('speedo_customer', JSON.stringify(json.customer));
           return json.customer;
         }
       }
     } catch (err) {
-      console.warn('Backend verify-otp error, using Supabase direct:', err.message);
+      console.warn('Backend verify-otp error, using local fallback:', err.message);
     }
 
-    // 2. Direct Supabase Fallback
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        const { data: existing } = await sb
-          .from('customers')
-          .select('*')
-          .eq('phone', cleanPhone)
-          .maybeSingle();
-
-        if (existing) {
-          if (name && name.trim()) {
-            const { data: updated } = await sb
-              .from('customers')
-              .update({ name: name.trim(), updated_at: new Date().toISOString() })
-              .eq('phone', cleanPhone)
-              .select()
-              .single();
-            const result = updated || existing;
-            localStorage.setItem('speedo_customer', JSON.stringify(result));
-            return result;
-          }
-          localStorage.setItem('speedo_customer', JSON.stringify(existing));
-          return existing;
-        }
-
-        // Create new in Supabase
-        const { data: created, error } = await sb
-          .from('customers')
-          .insert([{
-            phone: cleanPhone,
-            name: name || 'Valued Customer',
-            saved_address: '',
-            city: '',
-            state: '',
-            pincode: ''
-          }])
-          .select()
-          .single();
-
-        if (!error && created) {
-          localStorage.setItem('speedo_customer', JSON.stringify(created));
-          return created;
-        }
-      } catch (sbErr) {
-        console.warn('Supabase customer direct auth failed:', sbErr);
-      }
-    }
-
-    // 3. LocalStorage fallback
     const localCustomer = {
       phone: cleanPhone,
       name: name || 'Valued Customer',
@@ -1725,13 +1747,17 @@ export const api = {
   },
 
   updateCustomerProfile: async (phone, addressData) => {
-    const cleanPhone = phone.trim().replace(/\s+/g, '');
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
 
-    // 1. Try Backend API
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('speedo_customer_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/customer/profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({ phone: cleanPhone, ...addressData })
       });
       if (res.ok) {
@@ -1742,33 +1768,9 @@ export const api = {
         }
       }
     } catch (e) {
-      console.warn('Backend updateCustomerProfile failed, trying Supabase direct:', e.message);
+      console.warn('Backend updateCustomerProfile failed, saving locally:', e.message);
     }
 
-    // 2. Direct Supabase Fallback
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        const { data, error } = await sb
-          .from('customers')
-          .update({
-            ...addressData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('phone', cleanPhone)
-          .select()
-          .single();
-
-        if (!error && data) {
-          localStorage.setItem('speedo_customer', JSON.stringify(data));
-          return data;
-        }
-      } catch (sbErr) {
-        console.warn('Supabase updateCustomerProfile direct failed:', sbErr);
-      }
-    }
-
-    // Local storage fallback
     const current = JSON.parse(localStorage.getItem('speedo_customer') || '{}');
     const updated = { ...current, ...addressData, phone: cleanPhone };
     localStorage.setItem('speedo_customer', JSON.stringify(updated));
@@ -1776,44 +1778,47 @@ export const api = {
   },
 
   getCustomerOrders: async (phone) => {
-    const cleanPhone = phone.trim().replace(/\s+/g, '');
-    const phoneSuffix = cleanPhone.slice(-10);
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
 
-    // 1. Try Backend API
     try {
-      const res = await fetch(`${API_BASE}/customer/orders/${cleanPhone}`);
+      const headers = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('speedo_customer_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/customer/orders/${cleanPhone}`, {
+        headers,
+        credentials: 'include'
+      });
       if (res.ok) {
         const json = await res.json();
         return json.orders || [];
       }
-    } catch (e) {}
-
-    // 2. Direct Supabase
-    if (isSupabaseConfigured()) {
-      try {
-        const sb = getClient();
-        const { data, error } = await sb
-          .from('orders')
-          .select('*')
-          .ilike('customer_phone', `%${phoneSuffix}%`)
-          .order('created_at', { ascending: false });
-
-        if (!error && data) {
-          return data.map(o => ({
-            orderId: o.order_id,
-            customerName: o.customer_name,
-            total: Number(o.total),
-            status: o.status,
-            date: o.created_at ? new Date(o.created_at).toLocaleString('en-IN') : '',
-            items: o.items || [],
-            shippingAddress: o.shipping_address,
-            paymentMethod: o.payment_method
-          }));
-        }
-      } catch (sbErr) {}
+    } catch (e) {
+      console.warn('Backend getCustomerOrders failed:', e.message);
     }
 
     const allOrders = JSON.parse(localStorage.getItem('speedo_cache_orders') || '[]');
-    return allOrders.filter(o => o.customerPhone && o.customerPhone.includes(phoneSuffix));
+    return allOrders.filter(o => o.customerPhone && o.customerPhone.includes(cleanPhone));
+  },
+
+  // Admin: Get All Customers (Protected by Admin Auth)
+  getAdminCustomers: async () => {
+    try {
+      const token = sessionStorage.getItem('speedo_admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/admin/customers`, {
+        headers,
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return json.customers || [];
+      }
+    } catch (err) {
+      console.warn('Backend getAdminCustomers failed:', err.message);
+    }
+    return [];
   }
 };

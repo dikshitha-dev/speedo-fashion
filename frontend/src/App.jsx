@@ -11,7 +11,6 @@ import CustomerModal from './components/CustomerModal';
 import AuthGatePage from './pages/AuthGatePage';
 import AnimatedLogoIntro from './components/AnimatedLogoIntro';
 import { api } from './services/api';
-import { getClient } from './services/supabaseClient';
 
 export default function App() {
   // Routing view: 'store' | 'admin' | 'admin-login'
@@ -66,19 +65,12 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
 
-  // Sync latest customer profile and address from Supabase if customer exists
+  // Sync latest customer profile and address from backend if customer exists
   useEffect(() => {
     if (!customer?.phone) return;
     const cleanPhone = String(customer.phone).replace(/\D/g, '').slice(-10);
-    const supabase = getClient();
-    if (!supabase) return;
-
-    supabase
-      .from('customers')
-      .select('*')
-      .eq('phone', cleanPhone)
-      .maybeSingle()
-      .then(({ data: custRecord }) => {
+    api.getCustomerProfile(cleanPhone)
+      .then((custRecord) => {
         if (custRecord) {
           setCustomer(custRecord);
           localStorage.setItem('speedo_customer', JSON.stringify(custRecord));
