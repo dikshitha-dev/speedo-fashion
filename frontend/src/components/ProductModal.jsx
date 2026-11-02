@@ -453,18 +453,18 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                             : 'bg-white text-gray-800 border-gray-300 hover:border-black cursor-pointer'
                     }`}
                   >
-                    <span>{size}</span>
-                    <span className={`text-[9px] font-normal tracking-tight ${
-                      isSoldOut
-                        ? 'text-gray-400'
-                        : selectedSize === size
-                          ? 'text-red-300 font-semibold'
-                          : stockQty <= 5
-                            ? 'text-amber-600 font-bold'
-                            : 'text-gray-500'
-                    }`}>
-                      {isSoldOut ? 'Sold Out' : stockQty <= 5 ? `${stockQty} left` : `${stockQty} left`}
-                    </span>
+                    <span className="font-bold">{size}</span>
+                    {isSoldOut ? (
+                      <span className="text-[8.5px] font-normal text-gray-400 tracking-tight">
+                        Out of Stock
+                      </span>
+                    ) : stockQty <= 5 ? (
+                      <span className={`text-[8.5px] font-bold tracking-tight ${
+                        selectedSize === size ? 'text-red-200' : 'text-[#E53935]'
+                      }`}>
+                        Only {stockQty} left
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -506,6 +506,24 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
             </div>
           </div>
 
+          {/* Write Review Link (Below Quantity Selector, near Add to Cart) */}
+          {onWriteReview && (
+            <div className="px-4 py-3 bg-white border-b border-gray-200 flex items-center justify-between">
+              <span className="text-xs font-sans text-gray-500">Purchased this item?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onWriteReview(product);
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#E53935] hover:underline cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Write a Review</span>
+              </button>
+            </div>
+          )}
+
           {/* 5. Product Description & Highlights */}
           <div className="p-4 bg-white border-b border-gray-200 mt-2">
             <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-gray-800 mb-2">
@@ -528,22 +546,7 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
             </div>
           </div>
 
-          {/* Write a Review Link */}
-          {onWriteReview && (
-            <div className="p-4 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onWriteReview(product);
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#E53935] hover:underline"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Have this item? Write a Review</span>
-              </button>
-            </div>
-          )}
+
 
         </main>
 
@@ -578,7 +581,15 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
             ) : (
               <>
                 <ShoppingBag className="w-4 h-4" />
-                <span>{selectedSize ? `ADD TO CART • ${selectedSize} (${selectedSizeStock} Left)` : 'SELECT SIZE & ADD'}</span>
+                <span>
+                  {selectedSize 
+                    ? selectedSizeStock <= 0
+                      ? 'OUT OF STOCK'
+                      : selectedSizeStock <= 5
+                        ? `ADD TO CART • ${selectedSize} (Only ${selectedSizeStock} left)`
+                        : `ADD TO CART • ${selectedSize}`
+                    : 'SELECT SIZE & ADD'}
+                </span>
               </>
             )}
           </button>
@@ -693,7 +704,7 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
             {/* Details Column */}
             <div className="p-6 md:p-8 flex flex-col justify-between">
               <div>
-                {/* Category, Rating & Write Review Link */}
+                {/* Category & Rating */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#FF6B6B]">
@@ -705,18 +716,6 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                       <span>{product.rating || '4.9'}</span>
                     </div>
                   </div>
-
-                  {onWriteReview && (
-                    <button
-                      type="button"
-                      onClick={() => onWriteReview(product)}
-                      className="text-[11px] font-mono text-[#FF6B6B] hover:text-[#1A1A1A] hover:underline flex items-center gap-1 cursor-pointer font-bold"
-                      title={`Review ${product.name}`}
-                    >
-                      <MessageSquare className="w-3 h-3" />
-                      <span>Write Review</span>
-                    </button>
-                  )}
                 </div>
 
                 <h2 className="text-2xl font-display font-black text-[#1A1A1A] mb-3">
@@ -801,18 +800,18 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                                   : 'bg-white text-[#1A1A1A] border-[#B0B0B0] hover:border-[#1A1A1A] hover:bg-gray-50 cursor-pointer'
                           }`}
                         >
-                          <span>{s}</span>
-                          <span className={`text-[9px] font-normal ${
-                            isSoldOut
-                              ? 'text-gray-400'
-                              : selectedSize === s
-                                ? 'text-red-300 font-semibold'
-                                : stockQty <= 5
-                                  ? 'text-amber-600 font-bold'
-                                  : 'text-gray-500'
-                          }`}>
-                            {isSoldOut ? 'Out' : `${stockQty} left`}
-                          </span>
+                          <span className="font-bold">{s}</span>
+                          {isSoldOut ? (
+                            <span className="text-[8.5px] font-normal text-gray-400">
+                              Out of Stock
+                            </span>
+                          ) : stockQty <= 5 ? (
+                            <span className={`text-[8.5px] font-bold ${
+                              selectedSize === s ? 'text-red-200' : 'text-[#FF6B6B]'
+                            }`}>
+                              Only {stockQty} left
+                            </span>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -827,7 +826,7 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                 </div>
 
                 {/* Quantity Selector */}
-                <div className="flex items-center gap-4 mb-6">
+                <div className="flex items-center gap-4 mb-4">
                   <span className="text-xs font-mono font-bold">QTY:</span>
                   <div className="flex items-center border border-[#1A1A1A] bg-white">
                     <button 
@@ -860,6 +859,21 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
                     </button>
                   </div>
                 </div>
+
+                {/* Write Review Option (Below Quantity Selector, near Add to Cart) */}
+                {onWriteReview && (
+                  <div className="mb-4">
+                    <button
+                      type="button"
+                      onClick={() => onWriteReview(product)}
+                      className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#FF6B6B] hover:text-[#1A1A1A] hover:underline cursor-pointer transition-colors"
+                      title={`Write a review for ${product.name}`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-[#FF6B6B]" />
+                      <span>Write a Review</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons */}

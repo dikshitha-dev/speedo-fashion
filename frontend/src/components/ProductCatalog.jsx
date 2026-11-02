@@ -180,7 +180,7 @@ export default function ProductCatalog({ products, categories = [], onAddToCart,
                                 ? 'bg-gray-100 border-gray-200 text-gray-400 line-through' 
                                 : 'bg-gray-100 border-gray-300 text-[#1A1A1A]'
                             }`}
-                            title={isOut ? `Size ${size} Sold Out` : `Size ${size}: ${count} available`}
+                            title={isOut ? `Size ${size}: Out of Stock` : count <= 5 ? `Size ${size}: Only ${count} left` : `Size ${size}`}
                           >
                             {size}
                           </span>
