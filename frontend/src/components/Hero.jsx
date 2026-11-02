@@ -35,19 +35,40 @@ export default function Hero({ onExploreClick }) {
         {/* Left Side: Crisp HTML Typography, Branding, and Actions */}
         <div className="relative z-10 py-12 lg:py-16 max-w-xl">
           
-          {/* Speedo Fashions Custom Brush Logo + Emblem */}
+          {/* Speedo Fashions Logo & Brand Banner */}
           <div className="mb-4 sm:mb-5">
-            <img 
-              src="/speedo-hero-logo.png" 
-              alt="Speedo Fashions" 
-              className="h-16 sm:h-20 md:h-24 w-auto object-contain filter drop-shadow-md"
-              onError={(e) => {
-                // Graceful fallback if image is loading
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-            {/* Horizontal Line Accent as seen in reference */}
-            <div className="w-14 h-0.5 bg-white/20 mt-3 sm:mt-4"></div>
+            {/* Mobile Branding (Displays logo, brand name, and tagline on mobile screens < sm) */}
+            <div className="sm:hidden flex items-center gap-2.5 mb-3 bg-black/75 backdrop-blur-md border border-white/15 px-3 py-2 rounded shadow-md w-fit">
+              <div className="w-9 h-9 rounded bg-black p-0.5 border border-white/20 shrink-0 overflow-hidden flex items-center justify-center">
+                <img 
+                  src="/logo.jpg" 
+                  alt="Speedo Fashions Logo" 
+                  className="w-full h-full object-contain" 
+                />
+              </div>
+              <div>
+                <span className="font-display font-black text-sm tracking-tight text-white block leading-none">
+                  SPEEDO <span className="text-[#E53935]">FASHIONS</span>
+                </span>
+                <p className="text-[7.5px] font-mono uppercase tracking-[0.18em] text-[#E53935] font-bold mt-0.5">
+                  BEYOND FASHION, BEYOND LIMITS
+                </p>
+              </div>
+            </div>
+
+            {/* Desktop Brand Emblem (Kept unchanged on laptop/desktop screens) */}
+            <div className="hidden sm:block">
+              <img 
+                src="/speedo-hero-logo.png" 
+                alt="Speedo Fashions" 
+                className="h-16 sm:h-20 md:h-24 w-auto object-contain filter drop-shadow-md"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+              {/* Horizontal Line Accent as seen in reference */}
+              <div className="w-14 h-0.5 bg-white/20 mt-3 sm:mt-4"></div>
+            </div>
           </div>
 
           {/* Sharp Scalable Headline */}

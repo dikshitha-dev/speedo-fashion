@@ -29,7 +29,7 @@ export default function Navbar({ cartCount, onOpenCart, onNavigate, currentView,
       </div>
 
       {/* Main Navbar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
         
         {/* Brand Logo & Name */}
         <div 
@@ -45,12 +45,12 @@ export default function Navbar({ cartCount, onOpenCart, onNavigate, currentView,
               e.currentTarget.style.display = 'none';
             }} 
           />
-          <div className="hidden sm:block">
-            <span className="font-display font-black text-xl tracking-tighter text-[#111111] group-hover:text-[#E53935] transition-colors">
+          <div>
+            <span className="font-display font-black text-sm sm:text-xl tracking-tight sm:tracking-tighter text-[#111111] group-hover:text-[#E53935] transition-colors block leading-none">
               SPEEDO <span className="text-[#E53935]">FASHIONS</span>
             </span>
-            <p className="text-[9px] uppercase tracking-widest text-gray-500 font-semibold -mt-1">
-              Beyond Fashion, Beyond Limits
+            <p className="text-[7px] sm:text-[9px] uppercase tracking-widest text-gray-500 font-semibold mt-0.5 sm:-mt-1 whitespace-nowrap">
+              BEYOND FASHION, BEYOND LIMITS
             </p>
           </div>
         </div>
