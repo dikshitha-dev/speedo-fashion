@@ -350,7 +350,7 @@ export default function App() {
   // 4. RENDER CUSTOMER STOREFRONT
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] text-[#1A1A1A]">
-      {/* Cinematic Logo Intro Animation (Plays once per browser session) */}
+      {/* Cinematic Logo Intro Animation (Plays on every page reload and fresh visit) */}
       <AnimatedLogoIntro />
 
       {/* Header Navbar */}

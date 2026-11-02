@@ -5,39 +5,30 @@ import React, { useState, useEffect, useRef } from 'react';
  * 
  * Cinematic, racing-inspired logo reveal for Speedo Fashions.
  * - Total duration: ~3.2 seconds (at least 2s as specified).
- * - Plays once per browser session (persisted via sessionStorage).
+ * - Plays on every fresh visit and page reload.
  * - Respects prefers-reduced-motion.
  * - Seamlessly dissolves into the already-loaded homepage.
  * - Leaves 0 DOM overhead once completed.
  */
 export default function AnimatedLogoIntro({ onComplete }) {
   // 'playing' -> 'dissolving' -> 'complete'
-  const [stage, setStage] = useState(() => {
-    if (typeof window === 'undefined') return 'complete';
-    try {
-      if (sessionStorage.getItem('speedo_intro_shown') === 'true') {
-        return 'complete';
-      }
-    } catch (e) {
-      // sessionStorage unavailable
-    }
-    return 'playing';
-  });
+  // Plays on every page load & reload for both new and returning visitors
+  const [stage, setStage] = useState('playing');
 
   const timerRef1 = useRef(null);
   const timerRef2 = useRef(null);
 
   useEffect(() => {
-    // If already marked complete or running server-side, do nothing
-    if (stage === 'complete') return;
+    // Clear any legacy storage flag so it never blocks playback
+    try {
+      sessionStorage.removeItem('speedo_intro_shown');
+      localStorage.removeItem('speedo_intro_shown');
+    } catch (e) {}
 
     // Check for prefers-reduced-motion
     if (typeof window !== 'undefined' && window.matchMedia) {
       const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (prefersReduced) {
-        try {
-          sessionStorage.setItem('speedo_intro_shown', 'true');
-        } catch (e) {}
         setStage('complete');
         onComplete?.();
         return;
@@ -55,9 +46,6 @@ export default function AnimatedLogoIntro({ onComplete }) {
 
     // Intro complete: Fully remove from DOM at 3200ms
     timerRef2.current = setTimeout(() => {
-      try {
-        sessionStorage.setItem('speedo_intro_shown', 'true');
-      } catch (e) {}
       document.body.style.overflow = prevBodyOverflow || '';
       setStage('complete');
       onComplete?.();
@@ -72,9 +60,6 @@ export default function AnimatedLogoIntro({ onComplete }) {
 
   const handleSkip = (e) => {
     if (e) e.stopPropagation();
-    try {
-      sessionStorage.setItem('speedo_intro_shown', 'true');
-    } catch (err) {}
     document.body.style.overflow = '';
     setStage('dissolving');
     setTimeout(() => {
