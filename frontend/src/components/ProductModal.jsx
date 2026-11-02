@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 
 export default function ProductModal({ product, isOpen, onClose, onAddToCart, onWriteReview }) {
-  if (!isOpen || !product) return null;
+  const isVisible = Boolean(isOpen && product);
+  const activeProduct = product || {};
 
   const [selectedSize, setSelectedSize] = useState('');
   const [qty, setQty] = useState(1);
@@ -19,33 +20,105 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
   const [touchStartX, setTouchStartX] = useState(null);
   const [touchEndX, setTouchEndX] = useState(null);
 
+  // Ref to track and preserve the exact mobile scroll position
+  const savedScrollY = React.useRef(0);
+
   // Normalize multi-images array (up to 5 images)
   const imagesList = React.useMemo(() => {
-    if (Array.isArray(product.images) && product.images.length > 0) {
-      return product.images.filter(Boolean);
+    if (Array.isArray(activeProduct.images) && activeProduct.images.length > 0) {
+      return activeProduct.images.filter(Boolean);
     }
-    if (product.image) {
-      return [product.image];
+    if (activeProduct.image) {
+      return [activeProduct.image];
     }
     return ['https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80'];
+  }, [activeProduct.images, activeProduct.image]);
+
+  // Reset product state when a new product is selected
+  useEffect(() => {
+    if (product) {
+      setSelectedSize('');
+      setQty(1);
+      setSizeError(false);
+      setAddedNotice(false);
+      setActiveImgIndex(0);
+      setIsSizeGuideOpen(false);
+    }
   }, [product]);
 
+  // Handle body scroll lock & restore scroll position on return
   useEffect(() => {
-    setSelectedSize('');
-    setQty(1);
-    setSizeError(false);
-    setAddedNotice(false);
-    setActiveImgIndex(0);
-    setIsSizeGuideOpen(false);
-  }, [product]);
+    if (!isVisible) return;
 
-  // Lock body scroll when modal is open
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+    if (isMobile) {
+      // 1. Capture current scroll position before locking
+      const currentScrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+      savedScrollY.current = currentScrollY;
+
+      // 2. Save previous styles
+      const prevBodyOverflow = document.body.style.overflow;
+      const prevBodyPosition = document.body.style.position;
+      const prevBodyTop = document.body.style.top;
+      const prevBodyWidth = document.body.style.width;
+
+      // 3. Lock background on mobile to prevent background scroll drift
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${currentScrollY}px`;
+      document.body.style.width = '100%';
+
+      return () => {
+        // 4. Release all locks on mobile
+        document.body.style.overflow = prevBodyOverflow || '';
+        document.body.style.position = prevBodyPosition || '';
+        document.body.style.top = prevBodyTop || '';
+        document.body.style.width = prevBodyWidth || '';
+        document.documentElement.style.overflow = '';
+
+        // 5. Restore previous scroll position immediately & in next animation frame
+        window.scrollTo({
+          top: currentScrollY,
+          left: 0,
+          behavior: 'instant'
+        });
+        requestAnimationFrame(() => {
+          window.scrollTo(0, currentScrollY);
+        });
+      };
+    } else {
+      // Desktop: preserve existing desktop modal behavior exactly
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prevOverflow || '';
+      };
+    }
+  }, [isVisible]);
+
+  // Safety cleanup: ensure body scroll is always restored if component unmounts
   useEffect(() => {
-    document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      document.documentElement.style.overflow = '';
     };
   }, []);
+
+  // Listen to Escape key on desktop
+  useEffect(() => {
+    if (!isVisible) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isVisible, onClose]);
 
   const handlePrevImage = (e) => {
     if (e) e.stopPropagation();
@@ -58,18 +131,21 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
   };
 
   const handleTouchStart = (e) => {
+    if (!e.targetTouches || e.targetTouches.length === 0) return;
     setTouchStartX(e.targetTouches[0].clientX);
+    setTouchEndX(null);
   };
 
   const handleTouchMove = (e) => {
+    if (!e.targetTouches || e.targetTouches.length === 0) return;
     setTouchEndX(e.targetTouches[0].clientX);
   };
 
   const handleTouchEnd = () => {
-    if (!touchStartX || !touchEndX) return;
+    if (touchStartX === null || touchEndX === null) return;
     const distance = touchStartX - touchEndX;
-    const isLeftSwipe = distance > 40;
-    const isRightSwipe = distance < -40;
+    const isLeftSwipe = distance > 45;
+    const isRightSwipe = distance < -45;
     if (isLeftSwipe) {
       setActiveImgIndex((prev) => (prev === imagesList.length - 1 ? 0 : prev + 1));
     } else if (isRightSwipe) {
@@ -93,9 +169,12 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
     }, 900);
   };
 
-  const discountPercent = product.originalPrice && product.originalPrice > product.price
+  const discountPercent = product?.originalPrice && product.originalPrice > product.price
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 0;
+
+  // Unconditionally evaluate hooks; return null only if not visible
+  if (!isVisible) return null;
 
   return (
     <>
@@ -133,7 +212,10 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
         </header>
 
         {/* Scrollable Mobile Body */}
-        <main className="flex-1 overflow-y-auto overscroll-contain pb-28">
+        <main 
+          className="flex-1 overflow-y-auto overscroll-contain pb-28"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           
           {/* 1. Large Swipeable Product Image at the Top */}
           <section 
