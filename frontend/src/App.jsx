@@ -9,6 +9,7 @@ import CartDrawer from './components/CartDrawer';
 import CheckoutModal from './components/CheckoutModal';
 import CustomerModal from './components/CustomerModal';
 import AuthGatePage from './pages/AuthGatePage';
+import AnimatedLogoIntro from './components/AnimatedLogoIntro';
 import { api } from './services/api';
 import { getClient } from './services/supabaseClient';
 
@@ -333,6 +334,9 @@ export default function App() {
   // 4. RENDER CUSTOMER STOREFRONT
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] text-[#1A1A1A]">
+      {/* Cinematic Logo Intro Animation (Plays once per browser session) */}
+      <AnimatedLogoIntro />
+
       {/* Header Navbar */}
       <Navbar
         cartCount={totalCartCount}
