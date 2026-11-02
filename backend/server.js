@@ -303,8 +303,10 @@ app.get('/api/products', async (req, res) => {
             images: imagesList,
             badge: p.badge,
             tag: p.tag,
-            sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L', 'XL'],
+            sizes: Array.isArray(p.sizes) ? p.sizes : ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
             stock: Number(p.stock),
+            size_stock: p.size_stock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
+            sizeStock: p.size_stock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
             desc: p.desc,
             rating: Number(p.rating || 4.9),
             reviewsCount: Number(p.reviews_count || 12)
@@ -324,7 +326,7 @@ app.get('/api/products', async (req, res) => {
 });
 
 app.post('/api/products', requireAdminAuth, async (req, res) => {
-  const { name, category, price, originalPrice, image, images, badge, tag, sizes, stock, desc } = req.body;
+  const { name, category, price, originalPrice, image, images, badge, tag, sizes, stock, sizeStock, size_stock, desc } = req.body;
 
   if (!name || !price) {
     return res.status(400).json({ success: false, message: 'Name and price are required' });
@@ -348,10 +350,32 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
     tag: tag || 'Origami Craft',
     rating: 5.0,
     reviewsCount: 1,
-    sizes: Array.isArray(sizes) && sizes.length > 0 ? sizes : ['S', 'M', 'L', 'XL'],
-    stock: parseInt(stock, 10) || 12,
+    sizes: Array.isArray(sizes) && sizes.length > 0 ? sizes : ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+    stock: (() => {
+      const raw = sizeStock || size_stock;
+      if (raw && typeof raw === 'object') {
+        return Object.values(raw).reduce((sum, q) => sum + (Math.max(0, parseInt(q, 10) || 0)), 0);
+      }
+      return parseInt(stock, 10) || 12;
+    })(),
+    size_stock: (() => {
+      const raw = sizeStock || size_stock;
+      const normalized = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      if (raw && typeof raw === 'object') {
+        for (const [k, v] of Object.entries(raw)) {
+          normalized[k.toUpperCase()] = Math.max(0, parseInt(v, 10) || 0);
+        }
+      } else {
+        const s = parseInt(stock, 10) || 12;
+        normalized.S = Math.ceil(s / 3);
+        normalized.M = Math.ceil(s / 3);
+        normalized.L = Math.floor(s / 3);
+      }
+      return normalized;
+    })(),
     desc: desc || 'Architectural garment featuring precision origami fold dynamics and sculpted paper craft aesthetics.'
   };
+  newProduct.sizeStock = newProduct.size_stock;
 
   if (supabase) {
     try {
@@ -367,6 +391,7 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
         tag: newProduct.tag,
         sizes: newProduct.sizes,
         stock: newProduct.stock,
+        size_stock: newProduct.size_stock,
         desc: newProduct.desc,
         rating: newProduct.rating,
         reviews_count: newProduct.reviewsCount
@@ -426,7 +451,22 @@ app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   if (badge !== undefined) updatePayload.badge = badge;
   if (tag !== undefined) updatePayload.tag = tag;
   if (sizes !== undefined) updatePayload.sizes = sizes;
-  if (stock !== undefined) updatePayload.stock = parseInt(stock, 10);
+  if (sizeStock !== undefined || size_stock !== undefined) {
+    const raw = sizeStock || size_stock;
+    const normalized = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+    let total = 0;
+    if (raw && typeof raw === 'object') {
+      for (const [sz, q] of Object.entries(raw)) {
+        const val = Math.max(0, parseInt(q, 10) || 0);
+        normalized[sz.toUpperCase()] = val;
+        total += val;
+      }
+    }
+    updatePayload.size_stock = normalized;
+    updatePayload.stock = total;
+  } else if (stock !== undefined) {
+    updatePayload.stock = parseInt(stock, 10);
+  }
   if (desc !== undefined) updatePayload.desc = desc;
 
   if (supabase) {
@@ -784,6 +824,62 @@ app.post('/api/orders', async (req, res) => {
     paymentMethod: paymentMethod || 'UPI',
     notes: notes || 'Speedo Origami order'
   };
+
+  // 1. Size-Wise Stock Deduction & Oversell Prevention
+  if (supabase) {
+    for (const item of items) {
+      const prodId = item.id || item.productId;
+      const size = (item.size || 'M').toUpperCase();
+      const qty = Math.max(1, parseInt(item.qty || 1, 10));
+
+      try {
+        const { data: deductResult, error: rpcErr } = await supabase.rpc('deduct_product_size_stock', {
+          p_product_id: String(prodId),
+          p_size: size,
+          p_quantity: qty
+        });
+
+        if (rpcErr) {
+          console.warn('deduct_product_size_stock RPC warning:', rpcErr.message);
+        } else if (deductResult && deductResult.success === false) {
+          console.warn(`[Oversell Prevented] ${deductResult.message}`);
+          return res.status(400).json({
+            success: false,
+            code: 'OUT_OF_STOCK',
+            message: deductResult.message || `Size ${size} of ${item.name || 'item'} is out of stock.`,
+            details: deductResult
+          });
+        } else if (deductResult && deductResult.success) {
+          console.log(`[Stock Decreased] ${prodId} size ${size}: -${qty} (remaining: ${deductResult.remaining_qty})`);
+        }
+      } catch (e) {
+        console.warn('Stock deduction error:', e.message);
+      }
+    }
+  }
+
+  // Update in-memory product cache to keep remaining stock in sync
+  for (const item of items) {
+    const prodId = String(item.id || item.productId);
+    const size = (item.size || 'M').toUpperCase();
+    const qty = Math.max(1, parseInt(item.qty || 1, 10));
+    const memProd = memoryProducts.find(p => String(p.id) === prodId);
+    if (memProd) {
+      if (!memProd.size_stock) {
+        memProd.size_stock = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      }
+      const cur = memProd.size_stock[size] || 0;
+      if (cur < qty && !supabase) {
+        return res.status(400).json({
+          success: false,
+          code: 'OUT_OF_STOCK',
+          message: `Insufficient stock for size ${size}. Available: ${cur}, requested: ${qty}`
+        });
+      }
+      memProd.size_stock[size] = Math.max(0, cur - qty);
+      memProd.stock = Object.values(memProd.size_stock).reduce((a, b) => a + b, 0);
+    }
+  }
 
   if (supabase) {
     try {

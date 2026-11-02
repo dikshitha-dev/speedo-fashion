@@ -138,8 +138,10 @@ export const api = {
               image: p.image || imagesList[0] || '',
               badge: p.badge,
               tag: p.tag,
-              sizes: Array.isArray(p.sizes) ? p.sizes : ['S', 'M', 'L'],
+              sizes: Array.isArray(p.sizes) ? p.sizes : ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
               stock: Number(p.stock),
+              size_stock: p.size_stock || p.sizeStock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
+              sizeStock: p.size_stock || p.sizeStock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
               desc: p.desc,
               rating: p.rating || 4.9,
               reviewsCount: p.reviews_count || 32
@@ -187,8 +189,9 @@ export const api = {
       images: imagesList,
       badge: productData.badge || 'New Arrival',
       tag: productData.tag || 'Premium Fabric',
-      sizes: productData.sizes || ['S', 'M', 'L', 'XL'],
-      stock: parseInt(productData.stock, 10) || 15,
+      sizes: productData.sizes || ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+      stock: parseInt(productData.stock, 10) || 0,
+      size_stock: productData.size_stock || productData.sizeStock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 },
       desc: productData.desc || '',
       rating: 5.0,
       reviews_count: 1
@@ -284,6 +287,8 @@ export const api = {
       badge: productData.badge,
       tag: productData.tag,
       stock: parseInt(productData.stock, 10),
+      size_stock: productData.size_stock || productData.sizeStock || undefined,
+      sizes: productData.sizes || undefined,
       desc: productData.desc
     };
 
@@ -442,25 +447,74 @@ export const api = {
     return cached;
   },
 
-  // Place Order
+  // Place Order (With Atomic Size-Wise Stock Deduction & Oversell Protection)
   createOrder: async (orderData) => {
     const orderId = 'SF-ORD-' + Math.floor(1000 + Math.random() * 9000);
-    const newOrder = {
-      order_id: orderId,
-      customer_name: orderData.customerName,
-      customer_email: orderData.customerEmail,
-      customer_phone: orderData.customerPhone,
-      items: orderData.items,
-      total: parseFloat(orderData.total),
-      status: 'Pending',
-      shipping_address: orderData.shippingAddress,
-      payment_method: orderData.paymentMethod,
-      notes: orderData.notes
-    };
 
+    // 1. Always attempt through the backend API first (handles atomic stock reduction & validation)
+    try {
+      const res = await fetch(`${API_BASE}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderData)
+      });
+      
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Order creation failed: Insufficient stock');
+      }
+
+      if (json.data) {
+        const cached = JSON.parse(localStorage.getItem('speedo_cache_orders') || '[]');
+        cached.unshift(json.data);
+        localStorage.setItem('speedo_cache_orders', JSON.stringify(cached));
+        return json.data;
+      }
+    } catch (apiErr) {
+      // If error was explicitly returned from server (like out of stock), rethrow immediately!
+      if (apiErr.message && (apiErr.message.includes('stock') || apiErr.message.includes('Insufficient') || apiErr.message.includes('out of stock'))) {
+        throw apiErr;
+      }
+      console.warn('Backend orders endpoint failed, attempting direct Supabase fallback:', apiErr.message);
+    }
+
+    // 2. Direct Supabase Fallback: Atomically deduct stock for each size via RPC before inserting order
     if (isSupabaseConfigured()) {
       try {
         const sb = getClient();
+        
+        // Deduct size stock for each ordered item
+        for (const item of (orderData.items || [])) {
+          const prodId = item.id || item.productId;
+          const size = (item.size || 'M').toUpperCase();
+          const qty = Math.max(1, parseInt(item.qty || 1, 10));
+
+          const { data: deductRes, error: rpcErr } = await sb.rpc('deduct_product_size_stock', {
+            p_product_id: String(prodId),
+            p_size: size,
+            p_quantity: qty
+          });
+
+          if (rpcErr) {
+            console.warn('RPC deduct_product_size_stock warning:', rpcErr.message);
+          } else if (deductRes && deductRes.success === false) {
+            throw new Error(deductRes.message || `Size ${size} is currently out of stock.`);
+          }
+        }
+
+        const newOrder = {
+          order_id: orderId,
+          customer_name: orderData.customerName,
+          customer_email: orderData.customerEmail,
+          customer_phone: orderData.customerPhone,
+          items: orderData.items,
+          total: parseFloat(orderData.total),
+          status: 'Pending',
+          shipping_address: orderData.shippingAddress,
+          payment_method: orderData.paymentMethod,
+          notes: orderData.notes
+        };
+
         const { data, error } = await sb
           .from('orders')
           .insert([newOrder])
@@ -484,33 +538,24 @@ export const api = {
           cached.unshift(ord);
           localStorage.setItem('speedo_cache_orders', JSON.stringify(cached));
           return ord;
+        } else if (error) {
+          throw new Error(error.message || 'Supabase order placement error');
         }
       } catch (sbErr) {
-        console.warn('Supabase createOrder failed:', sbErr);
+        throw sbErr;
       }
     }
 
-    try {
-      const res = await fetch(`${API_BASE}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
-      });
-      if (!res.ok) throw new Error('Order creation failed');
-      const json = await res.json();
-      return json.data;
-    } catch (err) {
-      const cached = JSON.parse(localStorage.getItem('speedo_cache_orders') || '[]');
-      const fallbackOrder = {
-        orderId,
-        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        status: 'Pending',
-        ...orderData
-      };
-      cached.unshift(fallbackOrder);
-      localStorage.setItem('speedo_cache_orders', JSON.stringify(cached));
-      return fallbackOrder;
-    }
+    const cached = JSON.parse(localStorage.getItem('speedo_cache_orders') || '[]');
+    const fallbackOrder = {
+      orderId,
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      status: 'Pending',
+      ...orderData
+    };
+    cached.unshift(fallbackOrder);
+    localStorage.setItem('speedo_cache_orders', JSON.stringify(cached));
+    return fallbackOrder;
   },
 
   // Update Order Status

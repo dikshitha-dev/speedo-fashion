@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   tag TEXT DEFAULT '100% Cotton',
   sizes JSONB DEFAULT '["S", "M", "L", "XL"]'::jsonb,
   stock INTEGER DEFAULT 15,
+  size_stock JSONB DEFAULT '{"XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0, "XXL": 0}'::jsonb,
   "desc" TEXT,
   rating NUMERIC DEFAULT 4.9,
   reviews_count INTEGER DEFAULT 24,
@@ -246,3 +247,81 @@ VALUES
 (4, '6303202964', 'Vikram Malhotra', 5, 'Exceptional fabric engineering. The comfort stretch and geometric cuts elevate everyday streetwear to runway couture level.', 'approved', true, true, NOW() - INTERVAL '1 day')
 ON CONFLICT (id) DO NOTHING;
 
+
+
+-- Atomic function for size-wise stock deduction during order checkout
+CREATE OR REPLACE FUNCTION public.deduct_product_size_stock(
+  p_product_id TEXT,
+  p_size TEXT,
+  p_quantity INTEGER
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_current_stock JSONB;
+  v_size_qty INTEGER;
+  v_new_size_qty INTEGER;
+  v_total_stock INTEGER := 0;
+  v_updated_stock JSONB;
+  v_key TEXT;
+  v_val TEXT;
+  v_normalized_size TEXT;
+BEGIN
+  IF p_product_id IS NULL OR p_size IS NULL OR p_quantity IS NULL OR p_quantity <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Invalid inputs', 'code', 'INVALID_INPUT');
+  END IF;
+
+  v_normalized_size := UPPER(TRIM(p_size));
+
+  SELECT size_stock INTO v_current_stock
+  FROM public.products
+  WHERE id = p_product_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Product not found', 'code', 'PRODUCT_NOT_FOUND');
+  END IF;
+
+  IF v_current_stock IS NULL THEN
+    v_current_stock := '{"XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0, "XXL": 0}'::jsonb;
+  END IF;
+
+  v_size_qty := COALESCE((v_current_stock->>v_normalized_size)::INTEGER, 0);
+
+  IF v_size_qty < p_quantity THEN
+    RETURN jsonb_build_object(
+      'success', false, 
+      'message', 'Insufficient stock for size ' || v_normalized_size || '. Available: ' || v_size_qty || ', requested: ' || p_quantity,
+      'code', 'OUT_OF_STOCK',
+      'size', v_normalized_size,
+      'available', v_size_qty,
+      'requested', p_quantity
+    );
+  END IF;
+
+  v_new_size_qty := v_size_qty - p_quantity;
+  v_updated_stock := jsonb_set(v_current_stock, ARRAY[v_normalized_size], to_jsonb(v_new_size_qty));
+
+  FOR v_key, v_val IN SELECT * FROM jsonb_each_text(v_updated_stock) LOOP
+    v_total_stock := v_total_stock + COALESCE(v_val::INTEGER, 0);
+  END LOOP;
+
+  UPDATE public.products
+  SET size_stock = v_updated_stock,
+      stock = v_total_stock
+  WHERE id = p_product_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'product_id', p_product_id,
+    'size', v_normalized_size,
+    'remaining_qty', v_new_size_qty,
+    'total_stock', v_total_stock,
+    'size_stock', v_updated_stock
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.deduct_product_size_stock(TEXT, TEXT, INTEGER) TO anon, authenticated, service_role;

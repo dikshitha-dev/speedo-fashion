@@ -227,17 +227,24 @@ export default function App() {
     setIsCustomerModalOpen(false);
   };
 
-  // Cart Handlers
+  // Cart Handlers with Size-Stock Verification
   const handleAddToCart = (product, size, qty = 1) => {
     const chosenSize = size || (product.sizes ? product.sizes[0] : 'M');
-    const addQty = Math.max(1, parseInt(qty, 10) || 1);
+    const rawStock = product.size_stock || product.sizeStock || {};
+    const availableForSize = rawStock[chosenSize] !== undefined ? Number(rawStock[chosenSize]) : (product.stock || 10);
+    
+    // Prevent adding if size is out of stock
+    if (availableForSize <= 0) return;
+
+    const addQty = Math.min(availableForSize, Math.max(1, parseInt(qty, 10) || 1));
     setCart((prevCart) => {
       const existingIndex = prevCart.findIndex(
         (item) => item.id === product.id && item.size === chosenSize
       );
       if (existingIndex > -1) {
+        const nextQty = Math.min(availableForSize, prevCart[existingIndex].qty + addQty);
         return prevCart.map((item, idx) =>
-          idx === existingIndex ? { ...item, qty: item.qty + addQty } : item
+          idx === existingIndex ? { ...item, qty: nextQty } : item
         );
       }
       return [
@@ -258,12 +265,21 @@ export default function App() {
   const handleUpdateQty = (index, delta) => {
     setCart((prevCart) => {
       if (!prevCart[index]) return prevCart;
-      const targetQty = prevCart[index].qty + delta;
+      const item = prevCart[index];
+      const prod = products.find(p => p.id === item.id);
+      const rawStock = prod?.size_stock || prod?.sizeStock || {};
+      const availableForSize = rawStock[item.size] !== undefined ? Number(rawStock[item.size]) : (prod?.stock || 10);
+
+      const targetQty = item.qty + delta;
       if (targetQty <= 0) {
         return prevCart.filter((_, idx) => idx !== index);
       }
-      return prevCart.map((item, idx) =>
-        idx === index ? { ...item, qty: targetQty } : item
+      // Cap at size-wise available stock
+      if (delta > 0 && targetQty > availableForSize) {
+        return prevCart;
+      }
+      return prevCart.map((it, idx) =>
+        idx === index ? { ...it, qty: targetQty } : it
       );
     });
   };
@@ -389,7 +405,10 @@ export default function App() {
         customer={customer}
         onOpenAccount={() => setIsCustomerModalOpen(true)}
         onUpdateCustomer={(updated) => setCustomer(updated)}
-        onOrderSuccess={handleClearCart}
+        onOrderSuccess={() => {
+          handleClearCart();
+          fetchProducts();
+        }}
       />
 
       {/* Customer Account & Saved Address Modal */}

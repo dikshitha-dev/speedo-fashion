@@ -107,7 +107,7 @@ export default function RouteAdmin({
   });
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
 
-  // New Product Form State
+  // New Product Form State (Supports Size-Wise Inventory)
   const [newProduct, setNewProduct] = useState({
     name: '',
     category: 'Outerwear',
@@ -116,8 +116,16 @@ export default function RouteAdmin({
     image: 'https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80',
     badge: 'New Arrival',
     tag: 'Premium Cotton',
-    sizes: ['S', 'M', 'L', 'XL'],
-    stock: 20,
+    sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+    sizeStock: {
+      XS: 40,
+      S: 10,
+      M: 20,
+      L: 15,
+      XL: 5,
+      XXL: 0
+    },
+    stock: 90,
     desc: 'Contemporary tailored garment designed with precision cut geometric seams and comfort stretch.'
   });
 
@@ -415,12 +423,29 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
   // Open Edit Product Modal
   const handleOpenEditModal = (product) => {
     setEditingProduct(product);
+    const pSizes = product.size_stock || product.sizeStock || {};
+    const normalizedStock = {
+      XS: pSizes.XS !== undefined ? Number(pSizes.XS) : 0,
+      S: pSizes.S !== undefined ? Number(pSizes.S) : 0,
+      M: pSizes.M !== undefined ? Number(pSizes.M) : 0,
+      L: pSizes.L !== undefined ? Number(pSizes.L) : 0,
+      XL: pSizes.XL !== undefined ? Number(pSizes.XL) : 0,
+      XXL: pSizes.XXL !== undefined ? Number(pSizes.XXL) : 0
+    };
+    if (Object.values(normalizedStock).every(v => v === 0) && (product.stock || 0) > 0) {
+      normalizedStock.S = Math.ceil(product.stock / 3);
+      normalizedStock.M = Math.ceil(product.stock / 3);
+      normalizedStock.L = Math.floor(product.stock / 3);
+    }
+    const computedTotal = Object.values(normalizedStock).reduce((a, b) => a + b, 0);
+
     setEditFormData({
       name: product.name || '',
       category: product.category || 'Outerwear',
       price: product.price || '',
       originalPrice: product.originalPrice || '',
-      stock: product.stock !== undefined ? product.stock : 10,
+      stock: computedTotal,
+      sizeStock: normalizedStock,
       image: product.image || (Array.isArray(product.images) && product.images[0]) || '',
       images: Array.isArray(product.images) && product.images.length > 0 ? product.images : (product.image ? [product.image] : []),
       badge: product.badge || '',
@@ -436,12 +461,18 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
     setIsUpdatingProduct(true);
 
     try {
+      const finalSizeStock = editFormData.sizeStock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      const calculatedTotal = Object.values(finalSizeStock).reduce((sum, q) => sum + (Math.max(0, parseInt(q, 10) || 0)), 0);
+
       await api.updateProduct(editingProduct.id, {
         name: editFormData.name,
         category: editFormData.category,
         price: parseFloat(editFormData.price),
         originalPrice: editFormData.originalPrice ? parseFloat(editFormData.originalPrice) : parseFloat(editFormData.price) * 1.25,
-        stock: parseInt(editFormData.stock, 10),
+        stock: calculatedTotal,
+        sizeStock: finalSizeStock,
+        size_stock: finalSizeStock,
+        sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
         image: editFormData.image || (Array.isArray(editFormData.images) && editFormData.images[0]) || '',
         images: Array.isArray(editFormData.images) && editFormData.images.length > 0 ? editFormData.images : (editFormData.image ? [editFormData.image] : []),
         badge: editFormData.badge,
@@ -471,13 +502,20 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
     }
 
     try {
+      const finalSizeStock = newProduct.sizeStock || { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+      const calculatedTotal = Object.values(finalSizeStock).reduce((sum, q) => sum + (Math.max(0, parseInt(q, 10) || 0)), 0);
+
       const payload = {
         ...newProduct,
         price: parseFloat(productPrice),
-        originalPrice: parseFloat(newProduct.originalPrice || productPrice)
+        originalPrice: parseFloat(newProduct.originalPrice || productPrice),
+        stock: calculatedTotal,
+        sizeStock: finalSizeStock,
+        size_stock: finalSizeStock,
+        sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL']
       };
       const created = await api.addProduct(payload);
-      setStatusNotice(`✅ Product "${created.name}" published! It is now live in the store.`);
+      setStatusNotice(`✅ Product "${created.name}" published with size-wise stock! It is now live in the store.`);
       setTimeout(() => setStatusNotice(''), 4000);
 
       setNewProduct({
@@ -488,8 +526,16 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
         image: 'https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80',
         badge: 'New Arrival',
         tag: 'Premium Cotton',
-        sizes: ['S', 'M', 'L', 'XL'],
-        stock: 20,
+        sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+        sizeStock: {
+          XS: 40,
+          S: 10,
+          M: 20,
+          L: 15,
+          XL: 5,
+          XXL: 0
+        },
+        stock: 90,
         desc: ''
       });
 
@@ -931,18 +977,43 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
                           </div>
                         </td>
 
-                        {/* Stock */}
+                        {/* Stock (Total + Size-Wise Breakdown) */}
                         <td className="py-3.5 px-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${(p.stock || 0) > 10
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : (p.stock || 0) > 0
-                                ? 'bg-amber-50 text-amber-700'
-                                : 'bg-red-50 text-red-700'
-                            }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${(p.stock || 0) > 10 ? 'bg-emerald-500' : 'bg-amber-500'
-                              }`}></span>
-                            {p.stock !== undefined ? p.stock : 12} units
-                          </span>
+                          <div className="flex flex-col gap-1.5 min-w-[200px]">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold w-fit ${(p.stock || 0) > 10
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : (p.stock || 0) > 0
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-red-50 text-red-700'
+                              }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${(p.stock || 0) > 10 ? 'bg-emerald-500' : (p.stock || 0) > 0 ? 'bg-amber-500' : 'bg-red-500'
+                                }`}></span>
+                              {p.stock !== undefined ? p.stock : 0} units total
+                            </span>
+
+                            {/* Size-wise stock tags */}
+                            <div className="flex flex-wrap gap-1 text-[10px] font-mono">
+                              {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((sz) => {
+                                const sizeObj = p.size_stock || p.sizeStock || {};
+                                const count = sizeObj[sz] !== undefined ? Number(sizeObj[sz]) : 0;
+                                return (
+                                  <span
+                                    key={sz}
+                                    className={`px-1.5 py-0.5 rounded border ${
+                                      count > 5
+                                        ? 'bg-gray-50 border-gray-200 text-gray-700'
+                                        : count > 0
+                                          ? 'bg-amber-50 border-amber-300 text-amber-800 font-bold'
+                                          : 'bg-red-50 border-red-200 text-red-400 line-through'
+                                    }`}
+                                    title={`Size ${sz}: ${count} remaining`}
+                                  >
+                                    {sz}:{count}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </td>
 
                         {/* Badge / Tag */}
@@ -1309,18 +1380,41 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                    Stock Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={newProduct.stock}
-                    onChange={(e) => setNewProduct({ ...newProduct, stock: e.target.value })}
-                    placeholder="15"
-                    className="w-full px-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF6B6B] focus:bg-white"
-                  />
+                {/* Size-wise Stock Input Grid */}
+                <div className="sm:col-span-2 p-3.5 bg-gray-50 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
+                      Size-Wise Inventory Quantities (XS, S, M, L, XL, XXL) *
+                    </label>
+                    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full">
+                      Total: {Object.values(newProduct.sizeStock || {}).reduce((sum, v) => sum + (parseInt(v, 10) || 0), 0)} Units
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mb-2.5">
+                    Enter individual stock for each size (e.g. XS: 40, S: 10, M: 20, L: 15, XL: 5, XXL: 0). Sizes with stock will be available for purchase.
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((sz) => (
+                      <div key={sz} className="flex flex-col">
+                        <span className="text-[11px] font-mono font-bold text-gray-700 mb-1 text-center">
+                          {sz}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={(newProduct.sizeStock && newProduct.sizeStock[sz] !== undefined) ? newProduct.sizeStock[sz] : 0}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                            const updated = { ...(newProduct.sizeStock || {}), [sz]: val };
+                            const sum = Object.values(updated).reduce((a, b) => a + (parseInt(b, 10) || 0), 0);
+                            setNewProduct({ ...newProduct, sizeStock: updated, stock: sum });
+                          }}
+                          className="w-full text-center px-2 py-1.5 text-sm font-mono font-bold bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF6B6B]"
+                          placeholder="0"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -2227,17 +2321,41 @@ CREATE POLICY "Public Upload to product-images" ON storage.objects FOR INSERT WI
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                    Stock Units *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={editFormData.stock}
-                    onChange={(e) => setEditFormData({ ...editFormData, stock: e.target.value })}
-                    className="w-full px-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF6B6B] focus:bg-white"
-                  />
+                {/* Size-wise Stock Input Grid in Edit Modal */}
+                <div className="sm:col-span-2 p-3.5 bg-gray-50 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
+                      Size-Wise Stock Quantities (XS, S, M, L, XL, XXL) *
+                    </label>
+                    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full">
+                      Total: {Object.values(editFormData.sizeStock || {}).reduce((sum, v) => sum + (parseInt(v, 10) || 0), 0)} Units
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mb-2.5">
+                    Adjust remaining inventory per size. When customers buy a size, only that size decreases automatically.
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((sz) => (
+                      <div key={sz} className="flex flex-col">
+                        <span className="text-[11px] font-mono font-bold text-gray-700 mb-1 text-center">
+                          {sz}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={(editFormData.sizeStock && editFormData.sizeStock[sz] !== undefined) ? editFormData.sizeStock[sz] : 0}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                            const updated = { ...(editFormData.sizeStock || {}), [sz]: val };
+                            const sum = Object.values(updated).reduce((a, b) => a + (parseInt(b, 10) || 0), 0);
+                            setEditFormData({ ...editFormData, sizeStock: updated, stock: sum });
+                          }}
+                          className="w-full text-center px-2 py-1.5 text-sm font-mono font-bold bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF6B6B]"
+                          placeholder="0"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 

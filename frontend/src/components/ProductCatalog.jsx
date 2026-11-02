@@ -148,13 +148,27 @@ export default function ProductCatalog({ products, categories = [], onAddToCart,
                     </p>
 
                     {/* Available Sizes */}
-                    <div className="hidden sm:flex items-center gap-1.5 mb-4">
+                    <div className="hidden sm:flex flex-wrap items-center gap-1.5 mb-4">
                       <span className="text-[10px] font-mono text-[#B0B0B0] uppercase mr-1">SIZES:</span>
-                      {(product.sizes || ['S', 'M', 'L']).map(size => (
-                        <span key={size} className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-gray-100 border border-gray-300 text-[#1A1A1A]">
-                          {size}
-                        </span>
-                      ))}
+                      {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map(size => {
+                        const sizeStockObj = product.size_stock || product.sizeStock || {};
+                        const count = sizeStockObj[size] !== undefined ? Number(sizeStockObj[size]) : (product.sizes?.includes(size) ? (product.stock || 0) : 0);
+                        const isOut = count <= 0;
+                        if (isOut && (!product.sizes || !product.sizes.includes(size))) return null;
+                        return (
+                          <span 
+                            key={size} 
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 border ${
+                              isOut 
+                                ? 'bg-gray-100 border-gray-200 text-gray-400 line-through' 
+                                : 'bg-gray-100 border-gray-300 text-[#1A1A1A]'
+                            }`}
+                            title={isOut ? `Size ${size} Sold Out` : `Size ${size}: ${count} available`}
+                          >
+                            {size}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
 
