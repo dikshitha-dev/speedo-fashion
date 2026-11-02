@@ -274,14 +274,14 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
 
             {/* Image Counter Badge */}
             {imagesList.length > 1 && (
-              <div className="absolute top-3 right-3 bg-black/75 backdrop-blur-sm text-white text-[10px] font-mono px-2 py-0.5 rounded shadow">
+              <div className="absolute top-3 right-3 bg-[#1A1A1A]/80 backdrop-blur-sm text-white text-[9px] font-mono px-2 py-0.5 rounded shadow-sm z-10">
                 {activeImgIndex + 1} / {imagesList.length}
               </div>
             )}
 
-            {/* Product Badge */}
+            {/* Product Badge (Mobile - Clean, compact, branded origami styling) */}
             {product.badge && (
-              <div className="absolute top-3 left-3 bg-[#E53935] text-white text-[10px] font-mono font-bold uppercase px-2.5 py-0.5 rounded shadow">
+              <div className="absolute top-3 left-3 bg-[#1A1A1A] text-white text-[9px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 shadow-sm clip-origami-badge z-10 max-w-[55%] truncate">
                 {product.badge}
               </div>
             )}
@@ -328,12 +328,23 @@ export default function ProductModal({ product, isOpen, onClose, onAddToCart, on
 
           {/* 2. Product Details & Price */}
           <div className="p-4 bg-white border-b border-gray-200">
-            {/* Category & Rating */}
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="font-mono font-bold text-[#E53935] uppercase tracking-wider text-[11px]">
-                {product.category}
-              </span>
-              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
+            {/* Category, Fabric Tag & Rating */}
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono font-bold text-[#E53935] uppercase tracking-wider text-[11px]">
+                  {product.category}
+                </span>
+                {product.tag && (
+                  <>
+                    <span className="text-gray-300">•</span>
+                    <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-wider text-[#2A2A2A] bg-gray-100 border border-gray-200 px-2 py-0.5">
+                      <span className="w-1 h-1 rounded-full bg-[#E53935]" />
+                      {product.tag}
+                    </span>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded shrink-0">
                 <Star className="w-3.5 h-3.5 fill-[#E53935] text-[#E53935]" />
                 <span className="font-bold text-xs text-[#111111]">{product.rating || '4.9'}</span>
                 <span className="text-gray-400 text-[10px]">({product.reviewsCount || 42})</span>

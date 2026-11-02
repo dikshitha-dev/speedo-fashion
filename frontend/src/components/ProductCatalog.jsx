@@ -93,16 +93,23 @@ export default function ProductCatalog({ products, categories = [], onAddToCart,
                     }}
                   />
 
-                  {/* Corner Badge */}
+                  {/* Desktop Corner Badge (Unchanged) */}
                   {product.badge && (
-                    <div className="absolute top-3 left-3 bg-[#1A1A1A] text-white text-[10px] font-mono font-bold uppercase px-3 py-1 shadow-sm clip-origami-badge">
+                    <div className="hidden sm:block absolute top-3 left-3 bg-[#1A1A1A] text-white text-[10px] font-mono font-bold uppercase px-3 py-1 shadow-sm clip-origami-badge">
                       {product.badge}
                     </div>
                   )}
 
-                  {/* Origami Tag */}
+                  {/* Mobile Corner Badge (Clean, compact, no overlap) */}
+                  {product.badge && (
+                    <div className="sm:hidden absolute top-2 left-2 bg-[#1A1A1A]/95 text-white text-[8px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 shadow-xs clip-origami-badge max-w-[65%] truncate">
+                      {product.badge}
+                    </div>
+                  )}
+
+                  {/* Desktop Origami Tag (Unchanged) */}
                   {product.tag && (
-                    <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm text-[#1A1A1A] border border-[#1A1A1A] text-[9px] font-mono font-bold uppercase px-2.5 py-0.5">
+                    <div className="hidden sm:block absolute top-3 right-3 bg-white/95 backdrop-blur-sm text-[#1A1A1A] border border-[#1A1A1A] text-[9px] font-mono font-bold uppercase px-2.5 py-0.5">
                       {product.tag}
                     </div>
                   )}
@@ -111,6 +118,16 @@ export default function ProductCatalog({ products, categories = [], onAddToCart,
                 {/* Product Details Area */}
                 <div className="p-2.5 sm:p-6 flex flex-col flex-grow justify-between">
                   <div>
+                    {/* Mobile Fabric Tag (Placed below image to eliminate clutter & overlap) */}
+                    {product.tag && (
+                      <div className="sm:hidden mb-1.5 flex items-center">
+                        <span className="inline-flex items-center gap-1 text-[8px] font-mono font-bold uppercase tracking-wider text-[#2A2A2A] bg-[#F5F5F5] border border-[#E0E0E0] px-1.5 py-0.5">
+                          <span className="w-1 h-1 rounded-full bg-[#FF6B6B]" />
+                          {product.tag}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Category & Rating */}
                     <div className="flex items-center justify-between text-xs font-mono mb-1.5">
                       <span className="text-[#4A4A4A] uppercase tracking-wider">{product.category}</span>
